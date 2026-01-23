@@ -1,49 +1,56 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Auto-Calibrate</title>
+    <title>Smart Strip - Lens Fix & Auto-Cal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; }
         .container { max-width: 500px; margin: auto; text-align: center; }
         
-        #preview-box { width: 130px; height: 130px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
+        /* RESTORED VIEWPORT */
+        #preview-box { 
+            width: 150px; height: 150px; 
+            margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; 
+            overflow: hidden; background: #000; box-shadow: 0 0 15px rgba(0,230,118,0.2);
+        }
         video { width: 100%; height: 100%; object-fit: cover; }
 
         .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
-        .glucose-verified { font-size: 72px; color: #00e676; font-weight: bold; line-height: 1; }
+        .glucose-verified { font-size: 68px; color: #00e676; font-weight: bold; line-height: 1; }
         
-        .calib-badge { background: #2196f3; color: white; font-size: 10px; padding: 4px 8px; border-radius: 10px; display: inline-block; margin-top: 10px; text-transform: uppercase; }
-
         .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 15px 0; overflow: hidden; }
         #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
 
+        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; margin-bottom: 10px; }
+        .btn-scan { background: #00e676; color: #000; }
+        .btn-switch { background: #333; color: #fff; font-size: 14px; padding: 10px; }
+
         .history-card { background: #111; border-radius: 15px; padding: 15px; margin-top: 20px; text-align: left; border: 1px solid #222; }
         .log-entry { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
-        
-        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Self-Correcting Strip</h2>
-    
-    <div id="preview-box"><video id="v" autoplay playsinline muted></video></div>
-    
-    <div class="monitor-box">
-        <div class="glucose-verified" id="gluVerified">--</div>
-        <div id="status" style="font-size: 12px; color: #888;">AI CALIBRATION ACTIVE</div>
-        
-        <div class="progress-bar"><div id="progressFill"></div></div>
-        
-        <div class="calib-badge" id="calibStatus">Sensor Optimized</div>
+    <h2 style="color:#00e676; margin-bottom:5px;">Precision Monitor</h2>
+
+    <div id="preview-box">
+        <video id="v" autoplay playsinline muted></video>
     </div>
 
-    <button class="btn" id="scanBtn" onclick="runAutoScan()">START 60s SCAN</button>
+    <button class="btn btn-switch" onclick="toggleLens()">↺ SWITCH CAMERA LENS</button>
+    
+    <div class="monitor-box">
+        <div style="font-size: 11px; color: #2196f3; font-weight: bold;">VERIFIED RESULT (AVG)</div>
+        <div class="glucose-verified" id="gluVerified">--</div>
+        <div id="status" style="font-size: 12px; color: #888;">HOLD STILL FOR 60s</div>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+
+    <button class="btn btn-scan" id="scanBtn" onclick="startScan()">START 60s ANALYSIS</button>
 
     <div class="history-card">
-        <span style="color:#2196f3; font-size:11px; font-weight:bold;">AUTO-CORRECTED LOG</span>
+        <span style="color:#2196f3; font-size:11px; font-weight:bold;">MOVEMENT LOG</span>
         <div id="historyLog"></div>
     </div>
 </div>
@@ -56,20 +63,43 @@
     const ctx = c.getContext('2d');
     
     let currentStream = null;
-    let calibration = JSON.parse(localStorage.getItem('smart_strip_autocal')) || { bInt: 220, bGlu: 100, sens: 6.5, lastUpdate: Date.now() };
-    let logHistory = JSON.parse(localStorage.getItem('smart_strip_history_v5')) || [];
+    let cameraIdx = 0;
+    let videoDevices = [];
+    let calibration = JSON.parse(localStorage.getItem('smart_strip_autocal')) || { bInt: 220, bGlu: 100, sens: 6.5 };
+    let logHistory = JSON.parse(localStorage.getItem('smart_strip_history_v6')) || [];
     let buffer = [];
     const SCAN_TIME = 60000;
 
-    window.onload = async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        v.srcObject = stream;
-        currentStream = stream;
-        updateDisplay();
-        renderLog();
-    };
+    // Load Cameras and Start Initial Preview
+    async function initCamera() {
+        if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+        
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        videoDevices = devices.filter(d => d.kind === 'videoinput');
+        
+        try {
+            const constraints = { 
+                video: { 
+                    deviceId: videoDevices[cameraIdx] ? { exact: videoDevices[cameraIdx].deviceId } : undefined,
+                    facingMode: 'environment' 
+                } 
+            };
+            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+            v.srcObject = currentStream;
+        } catch (e) {
+            console.error("Camera Error", e);
+            // Fallback
+            currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            v.srcObject = currentStream;
+        }
+    }
 
-    async function runAutoScan() {
+    function toggleLens() {
+        cameraIdx = (cameraIdx + 1) % videoDevices.length;
+        initCamera();
+    }
+
+    async function startScan() {
         const track = currentStream.getVideoTracks()[0];
         if (track.getCapabilities().torch) await track.applyConstraints({ advanced: [{ torch: true }] });
 
@@ -87,7 +117,7 @@
             for (let i = 0; i < pix.length; i += 4) red += pix[i];
             const intensity = red / (pix.length / 4);
 
-            if (elapsed > 5000 && intensity > 35) { buffer.push(intensity); }
+            if (elapsed > 5000 && intensity > 35) buffer.push(intensity);
 
             if (elapsed >= SCAN_TIME) {
                 clearInterval(timer);
@@ -98,32 +128,25 @@
     }
 
     function finishAnalysis() {
-        if (buffer.length < 100) { alert("Signal lost."); resetUI(); return; }
+        if (buffer.length < 100) { alert("Insufficient Signal."); resetUI(); return; }
 
         const avg = buffer.reduce((a, b) => a + b) / buffer.length;
-        const cleanData = buffer.filter(x => Math.abs(x - avg) <= (avg * 0.05));
-        const finalAvgInt = cleanData.reduce((a, b) => a + b) / cleanData.length;
+        const finalAvgInt = buffer.filter(x => Math.abs(x - avg) <= (avg * 0.05)).reduce((a, b) => a + b) / buffer.length;
 
-        // Apply Calibration
+        // Calculate Result
         const rawGlu = Math.round(calibration.bGlu + (calibration.bInt - finalAvgInt) * calibration.sens);
         
-        // AUTO-RECALIBRATION LOGIC
-        // If the reading is within a normal fasting range (e.g. 80-110) for 3 days, 
-        // the app slowly nudges the 'bInt' to match that reality.
-        if (logHistory.length > 5) {
-            const recentAvg = logHistory.slice(0, 5).reduce((a, b) => a + b.int, 0) / 5;
-            calibration.bInt = (calibration.bInt * 0.9) + (recentAvg * 0.1); // 10% weight to new reality
+        // Auto-Recalibration Nudge
+        if (logHistory.length > 3) {
+            calibration.bInt = (calibration.bInt * 0.95) + (finalAvgInt * 0.05);
             localStorage.setItem('smart_strip_autocal', JSON.stringify(calibration));
-            document.getElementById('calibStatus').innerText = "AI RE-CALIBRATED";
         }
 
-        const entry = { 
+        logHistory.unshift({ 
             time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
-            val: rawGlu,
-            int: finalAvgInt 
-        };
-        logHistory.unshift(entry);
-        localStorage.setItem('smart_strip_history_v5', JSON.stringify(logHistory.slice(0, 15)));
+            val: rawGlu 
+        });
+        localStorage.setItem('smart_strip_history_v6', JSON.stringify(logHistory.slice(0, 10)));
         
         updateDisplay();
         renderLog();
@@ -133,7 +156,7 @@
     function updateDisplay() {
         if (logHistory.length === 0) return;
         const lastThree = logHistory.slice(0, 3);
-        const avg = Math.round(lastThree.reduce((acc, curr) => acc + curr.val, 0) / lastThree.length);
+        const avg = Math.round(lastThree.reduce((a, b) => a + b.val, 0) / lastThree.length);
         document.getElementById('gluVerified').innerText = avg;
     }
 
@@ -147,7 +170,8 @@
         document.getElementById('scanBtn').disabled = false;
         document.getElementById('progressFill').style.width = "0%";
     }
+
+    window.onload = initCamera;
 </script>
 </body>
 </html>
-
