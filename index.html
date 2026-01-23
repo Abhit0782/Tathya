@@ -1,17 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Lens Fix & Auto-Cal</title>
+    <title>Smart Strip - Force Flash</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; }
-        .container { max-width: 500px; margin: auto; text-align: center; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
+        .container { max-width: 500px; margin: auto; }
         
-        /* RESTORED VIEWPORT */
         #preview-box { 
             width: 150px; height: 150px; 
             margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; 
-            overflow: hidden; background: #000; box-shadow: 0 0 15px rgba(0,230,118,0.2);
+            overflow: hidden; background: #000;
         }
         video { width: 100%; height: 100%; object-fit: cover; }
 
@@ -21,38 +20,35 @@
         .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 15px 0; overflow: hidden; }
         #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
 
-        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; margin-bottom: 10px; }
+        .btn { padding: 16px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-bottom: 8px; }
         .btn-scan { background: #00e676; color: #000; }
-        .btn-switch { background: #333; color: #fff; font-size: 14px; padding: 10px; }
-
-        .history-card { background: #111; border-radius: 15px; padding: 15px; margin-top: 20px; text-align: left; border: 1px solid #222; }
-        .log-entry { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
+        .btn-util { background: #333; color: #fff; font-size: 12px; }
+        .flash-on { background: #ffa000 !important; color: #000; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676; margin-bottom:5px;">Precision Monitor</h2>
+    <h2 style="color:#00e676;">Hardware Sync Fix</h2>
 
     <div id="preview-box">
         <video id="v" autoplay playsinline muted></video>
     </div>
 
-    <button class="btn btn-switch" onclick="toggleLens()">↺ SWITCH CAMERA LENS</button>
+    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+        <button class="btn btn-util" onclick="toggleLens()">↺ Switch Lens</button>
+        <button id="torchBtn" class="btn btn-util" onclick="manualFlashControl()">🔦 Force Flash</button>
+    </div>
     
     <div class="monitor-box">
-        <div style="font-size: 11px; color: #2196f3; font-weight: bold;">VERIFIED RESULT (AVG)</div>
         <div class="glucose-verified" id="gluVerified">--</div>
-        <div id="status" style="font-size: 12px; color: #888;">HOLD STILL FOR 60s</div>
+        <div id="status" style="font-size: 12px; color: #888;">READY</div>
         <div class="progress-bar"><div id="progressFill"></div></div>
     </div>
 
-    <button class="btn btn-scan" id="scanBtn" onclick="startScan()">START 60s ANALYSIS</button>
+    <button class="btn btn-scan" id="scanBtn" onclick="startScan()">START 60s SCAN</button>
 
-    <div class="history-card">
-        <span style="color:#2196f3; font-size:11px; font-weight:bold;">MOVEMENT LOG</span>
-        <div id="historyLog"></div>
-    </div>
+    <div id="historyLog" style="text-align: left; background: #111; padding: 10px; border-radius: 10px; font-size: 14px;"></div>
 </div>
 
 <canvas id="c" width="50" height="50" style="display:none;"></canvas>
@@ -65,15 +61,13 @@
     let currentStream = null;
     let cameraIdx = 0;
     let videoDevices = [];
+    let torchState = false;
     let calibration = JSON.parse(localStorage.getItem('smart_strip_autocal')) || { bInt: 220, bGlu: 100, sens: 6.5 };
     let logHistory = JSON.parse(localStorage.getItem('smart_strip_history_v6')) || [];
     let buffer = [];
-    const SCAN_TIME = 60000;
 
-    // Load Cameras and Start Initial Preview
     async function initCamera() {
         if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-        
         const devices = await navigator.mediaDevices.enumerateDevices();
         videoDevices = devices.filter(d => d.kind === 'videoinput');
         
@@ -87,29 +81,44 @@
             currentStream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = currentStream;
         } catch (e) {
-            console.error("Camera Error", e);
-            // Fallback
             currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
             v.srcObject = currentStream;
         }
     }
 
+    async function manualFlashControl() {
+        const track = currentStream.getVideoTracks()[0];
+        const capabilities = track.getCapabilities();
+        
+        if (capabilities.torch) {
+            torchState = !torchState;
+            await track.applyConstraints({ advanced: [{ torch: torchState }] });
+            document.getElementById('torchBtn').classList.toggle('flash-on', torchState);
+            document.getElementById('torchBtn').innerText = torchState ? "🔦 Flash: ON" : "🔦 Force Flash";
+        } else {
+            alert("This lens does not support torch. Please 'Switch Lens'.");
+        }
+    }
+
     function toggleLens() {
         cameraIdx = (cameraIdx + 1) % videoDevices.length;
+        torchState = false;
+        document.getElementById('torchBtn').classList.remove('flash-on');
         initCamera();
     }
 
     async function startScan() {
-        const track = currentStream.getVideoTracks()[0];
-        if (track.getCapabilities().torch) await track.applyConstraints({ advanced: [{ torch: true }] });
-
+        // Force flash on before scan starts
+        if(!torchState) await manualFlashControl();
+        
         document.getElementById('scanBtn').disabled = true;
         buffer = [];
         const start = Date.now();
 
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            document.getElementById('progressFill').style.width = (elapsed / SCAN_TIME * 100) + "%";
+            document.getElementById('progressFill').style.width = (elapsed / 60000 * 100) + "%";
+            document.getElementById('status').innerText = `SCANNING... ${Math.ceil((60000 - elapsed)/1000)}s`;
 
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
@@ -117,58 +126,35 @@
             for (let i = 0; i < pix.length; i += 4) red += pix[i];
             const intensity = red / (pix.length / 4);
 
-            if (elapsed > 5000 && intensity > 35) buffer.push(intensity);
+            if (elapsed > 3000 && intensity > 20) buffer.push(intensity);
 
-            if (elapsed >= SCAN_TIME) {
+            if (elapsed >= 60000) {
                 clearInterval(timer);
-                if (track.getCapabilities().torch) track.applyConstraints({ advanced: [{ torch: false }] });
                 finishAnalysis();
             }
         }, 100);
     }
 
     function finishAnalysis() {
-        if (buffer.length < 100) { alert("Insufficient Signal."); resetUI(); return; }
-
+        if (buffer.length < 50) { alert("Signal Lost. Ensure finger covers lens."); resetUI(); return; }
         const avg = buffer.reduce((a, b) => a + b) / buffer.length;
-        const finalAvgInt = buffer.filter(x => Math.abs(x - avg) <= (avg * 0.05)).reduce((a, b) => a + b) / buffer.length;
-
-        // Calculate Result
-        const rawGlu = Math.round(calibration.bGlu + (calibration.bInt - finalAvgInt) * calibration.sens);
+        const rawGlu = Math.round(calibration.bGlu + (calibration.bInt - avg) * calibration.sens);
         
-        // Auto-Recalibration Nudge
-        if (logHistory.length > 3) {
-            calibration.bInt = (calibration.bInt * 0.95) + (finalAvgInt * 0.05);
-            localStorage.setItem('smart_strip_autocal', JSON.stringify(calibration));
-        }
-
-        logHistory.unshift({ 
-            time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
-            val: rawGlu 
-        });
-        localStorage.setItem('smart_strip_history_v6', JSON.stringify(logHistory.slice(0, 10)));
+        logHistory.unshift({ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: rawGlu });
+        localStorage.setItem('smart_strip_history_v6', JSON.stringify(logHistory.slice(0, 5)));
         
-        updateDisplay();
+        document.getElementById('gluVerified').innerText = rawGlu;
         renderLog();
         resetUI();
     }
 
-    function updateDisplay() {
-        if (logHistory.length === 0) return;
-        const lastThree = logHistory.slice(0, 3);
-        const avg = Math.round(lastThree.reduce((a, b) => a + b.val, 0) / lastThree.length);
-        document.getElementById('gluVerified').innerText = avg;
-    }
-
     function renderLog() {
-        document.getElementById('historyLog').innerHTML = logHistory.map(h => `
-            <div class="log-entry"><span>${h.time}</span><span><b>${h.val} mg/dL</b></span></div>
-        `).join('');
+        document.getElementById('historyLog').innerHTML = logHistory.map(h => `<div>${h.time}: <b>${h.val} mg/dL</b></div>`).join('');
     }
 
     function resetUI() {
         document.getElementById('scanBtn').disabled = false;
-        document.getElementById('progressFill').style.width = "0%";
+        document.getElementById('status').innerText = "DONE";
     }
 
     window.onload = initCamera;
