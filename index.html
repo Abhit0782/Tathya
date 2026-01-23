@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Thermal Control</title>
+    <title>Smart Strip - Sync & Log</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; }
@@ -17,38 +17,47 @@
         .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
         .glucose-now { font-size: 64px; color: #00e676; font-weight: bold; line-height: 1; margin: 10px 0; }
         
-        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-bottom: 10px; overflow: hidden; }
-        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.2s linear; }
+        .progress-bar { width: 100%; height: 12px; background: #333; border-radius: 6px; margin: 10px 0; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
         
-        .thermal-label { font-size: 10px; color: #ffa000; font-weight: bold; margin-bottom: 5px; display: block; }
+        /* History Log Styles */
+        .history-card { background: #111; border-radius: 15px; padding: 15px; margin-top: 20px; text-align: left; border: 1px solid #222; }
+        .log-entry { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
+        .log-entry:first-child { color: #00e676; font-weight: bold; }
+
         .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
         .btn:disabled { background: #222; color: #555; }
-        
-        #status { font-size: 14px; font-weight: bold; color: #2196f3; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Thermal Pulse Analyzer</h2>
+    <h2 style="color:#00e676;">Precision Sync Monitor</h2>
 
     <div id="preview-box">
         <video id="v" autoplay playsinline muted></video>
     </div>
     
     <div class="monitor-box">
-        <div id="status">READY</div>
+        <div id="status" style="font-size: 14px; color: #2196f3; font-weight: bold;">READY</div>
         <div class="glucose-now" id="gluNow">--</div>
         
         <div class="progress-bar"><div id="progressFill"></div></div>
-        <span class="thermal-label" id="thermalStatus">COOLING SYSTEM ACTIVE</span>
+        <div style="font-size: 11px; color: #666;">ANALYSIS DURATION: 60 SECONDS</div>
     </div>
 
-    <button class="btn" id="scanBtn" onclick="runPulsedAnalysis()">START PULSED 60s SCAN</button>
+    <button class="btn" id="scanBtn" onclick="runSyncAnalysis()">START 1-MIN PRECISION SCAN</button>
 
     <div style="margin: 20px 0;">
-        <input type="number" id="calRef" placeholder="Meter mg/dL" style="padding:10px; width:100px; border-radius:8px; border:none; background:#1a1a1a; color:white;">
-        <button onclick="syncCal()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:8px; font-weight:bold; cursor:pointer;">Sync</button>
+        <input type="number" id="calRef" placeholder="Real mg/dL" style="padding:10px; width:100px; border-radius:8px; border:none; background:#1a1a1a; color:white;">
+        <button onclick="syncCal()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:8px; font-weight:bold; cursor:pointer;">Sync Meter</button>
+    </div>
+
+    <div class="history-card">
+        <h4 style="margin: 0 0 10px 0; color: #00e676;">MOVEMENT LOG</h4>
+        <div id="historyLog">
+            <div style="color:#444; text-align:center;">No data logged yet.</div>
+        </div>
     </div>
 </div>
 
@@ -60,7 +69,8 @@
     const ctx = c.getContext('2d', {willReadFrequently: true});
     
     let currentStream = null;
-    let calibration = JSON.parse(localStorage.getItem('smart_strip_haptic')) || { bInt: 220, bGlu: 100, sens: 5.5 };
+    let calibration = JSON.parse(localStorage.getItem('smart_strip_final')) || { bInt: 220, bGlu: 100, sens: 6.0 };
+    let logHistory = JSON.parse(localStorage.getItem('smart_strip_history')) || [];
     let buffer = [];
     const SCAN_TIME = 60000;
 
@@ -70,101 +80,100 @@
         const constraints = { video: { deviceId: videoDevices[videoDevices.length - 1].deviceId, facingMode: 'environment' } };
         currentStream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = currentStream;
+        renderLog();
     };
 
-    async function toggleFlash(state) {
+    async function runSyncAnalysis() {
         const track = currentStream.getVideoTracks()[0];
         const capabilities = track.getCapabilities();
-        if (capabilities.torch) {
-            try {
-                await track.applyConstraints({ advanced: [{ torch: state }] });
-            } catch (e) { console.log("Flash control error"); }
-        }
-    }
+        
+        // 1. Force Flash ON for the entire 60s
+        if (capabilities.torch) await track.applyConstraints({ advanced: [{ torch: true }] });
 
-    async function runPulsedAnalysis() {
         document.getElementById('scanBtn').disabled = true;
         buffer = [];
         const start = Date.now();
-        
-        // HEART OF THE THERMAL LOGIC
-        // We pulse the flash: 2 seconds ON (Capture), 1 second OFF (Cooling)
-        const pulseCycle = async () => {
-            const elapsed = Date.now() - start;
-            if (elapsed >= SCAN_TIME) {
-                await toggleFlash(false);
-                finishAnalysis();
-                return;
-            }
 
-            // UI Updates
+        const timer = setInterval(() => {
+            const elapsed = Date.now() - start;
             const progress = (elapsed / SCAN_TIME) * 100;
             document.getElementById('progressFill').style.width = progress + "%";
-            document.getElementById('status').innerText = `ANALYZING... ${Math.ceil((SCAN_TIME - elapsed)/1000)}s`;
+            document.getElementById('status').innerText = `STABILIZING & SCANNING... ${Math.ceil((SCAN_TIME - elapsed)/1000)}s`;
 
-            // FLASH ON - DATA CAPTURE
-            document.getElementById('thermalStatus').innerText = "FLASH ACTIVE: CAPTURING DATA";
-            document.getElementById('thermalStatus').style.color = "#ff5252";
-            await toggleFlash(true);
-            
-            // Wait 2 seconds while capturing
-            let captureCount = 0;
-            const captureInterval = setInterval(() => {
-                ctx.drawImage(v, 0, 0, 50, 50);
-                const pix = ctx.getImageData(0, 0, 50, 50).data;
-                let red = 0;
-                for (let i = 0; i < pix.length; i += 4) red += pix[i];
-                const intensity = red / (pix.length / 4);
-                if (intensity > 30) buffer.push(intensity);
-                captureCount++;
-                if (captureCount > 20) clearInterval(captureInterval);
-            }, 100);
+            // Capture data
+            ctx.drawImage(v, 0, 0, 50, 50);
+            const pix = ctx.getImageData(0, 0, 50, 50).data;
+            let red = 0;
+            for (let i = 0; i < pix.length; i += 4) red += pix[i];
+            const intensity = red / (pix.length / 4);
 
-            await new Promise(r => setTimeout(r, 2000));
+            // We only collect data after the first 3 seconds to allow auto-exposure to settle
+            if (elapsed > 3000 && intensity > 30) {
+                buffer.push(intensity);
+            }
 
-            // FLASH OFF - COOLING
-            document.getElementById('thermalStatus').innerText = "COOLING SENSOR... PAUSING";
-            document.getElementById('thermalStatus').style.color = "#ffa000";
-            await toggleFlash(false);
-            
-            await new Promise(r => setTimeout(r, 1000)); // 1 second cooling break
-            
-            pulseCycle(); // Next Cycle
-        };
-
-        pulseCycle();
+            if (elapsed >= SCAN_TIME) {
+                clearInterval(timer);
+                if (capabilities.torch) track.applyConstraints({ advanced: [{ torch: false }] });
+                finishAnalysis();
+            }
+        }, 100);
     }
 
     function finishAnalysis() {
         if (buffer.length < 100) {
-            alert("Analysis failed. Finger moved during pulse.");
+            alert("Analysis failed. No stable signal detected.");
             resetUI();
             return;
         }
-        
+
+        // Statistical cleaning
         buffer.sort((a,b) => a-b);
-        const clean = buffer.slice(Math.floor(buffer.length*0.3), Math.floor(buffer.length*0.7));
+        const clean = buffer.slice(Math.floor(buffer.length*0.2), Math.floor(buffer.length*0.8));
         const avgInt = clean.reduce((a,b) => a+b) / clean.length;
-        const glu = Math.round(calibration.bGlu + (calibration.bInt - avgInt) * calibration.sens);
         
+        const glu = Math.round(calibration.bGlu + (calibration.bInt - avgInt) * calibration.sens);
         document.getElementById('gluNow').innerText = glu;
-        document.getElementById('thermalStatus').innerText = "SCAN COMPLETE - SENSOR COOL";
-        document.getElementById('thermalStatus').style.color = "#00e676";
+
+        // Save to History Log
+        const entry = {
+            time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+            val: glu
+        };
+        logHistory.unshift(entry);
+        if(logHistory.length > 10) logHistory.pop();
+        localStorage.setItem('smart_strip_history', JSON.stringify(logHistory));
+        
+        renderLog();
         resetUI();
+    }
+
+    function renderLog() {
+        const logCont = document.getElementById('historyLog');
+        if (logHistory.length === 0) return;
+        logCont.innerHTML = logHistory.map(h => `
+            <div class="log-entry">
+                <span>${h.time}</span>
+                <span><b>${h.val} mg/dL</b></span>
+            </div>
+        `).join('');
     }
 
     function syncCal() {
         const real = parseFloat(document.getElementById('calRef').value);
-        if (!real || buffer.length === 0) return alert("Run a scan first.");
+        if (!real || buffer.length === 0) return alert("Run a full 1-min scan first!");
+        
+        // Use the average of the last scan to set the new baseline
         const lastAvg = buffer.reduce((a,b)=>a+b)/buffer.length;
         calibration.bInt = lastAvg;
         calibration.bGlu = real;
-        localStorage.setItem('smart_strip_haptic', JSON.stringify(calibration));
-        alert("Synced at Baseline: " + lastAvg.toFixed(2));
+        localStorage.setItem('smart_strip_final', JSON.stringify(calibration));
+        alert("Calibration Synced to: " + real + " mg/dL");
     }
 
     function resetUI() {
         document.getElementById('scanBtn').disabled = false;
+        document.getElementById('status').innerText = "SCAN COMPLETE";
         document.getElementById('progressFill').style.width = "0%";
     }
 </script>
