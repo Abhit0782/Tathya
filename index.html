@@ -1,67 +1,55 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Prime Lens Fix</title>
+    <title>Smart Strip - Thermal Control</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; }
         .container { max-width: 500px; margin: auto; text-align: center; }
         
         #preview-box { 
-            width: 150px; height: 150px; 
-            margin: 10px auto; 
-            border-radius: 50%; 
-            border: 3px solid #00e676; 
-            overflow: hidden; 
-            background: #000;
+            width: 140px; height: 140px; 
+            margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; 
+            overflow: hidden; background: #000;
         }
         video { width: 100%; height: 100%; object-fit: cover; }
 
         .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
         .glucose-now { font-size: 64px; color: #00e676; font-weight: bold; line-height: 1; margin: 10px 0; }
         
-        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-bottom: 15px; overflow: hidden; }
+        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-bottom: 10px; overflow: hidden; }
         #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.2s linear; }
         
-        .stability-bar { width: 100%; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
-        #stabilityFill { width: 100%; height: 100%; background: #00e676; }
-
-        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; margin-bottom: 10px;}
-        .btn-alt { background: #333; color: #e0e0e0; font-size: 14px; padding: 10px; }
+        .thermal-label { font-size: 10px; color: #ffa000; font-weight: bold; margin-bottom: 5px; display: block; }
+        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
         .btn:disabled { background: #222; color: #555; }
         
-        .log-entry { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
-        .alert-active { color: #ff5252 !important; font-weight: bold; }
+        #status { font-size: 14px; font-weight: bold; color: #2196f3; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Precision Scan v3.0</h2>
+    <h2 style="color:#00e676;">Thermal Pulse Analyzer</h2>
 
     <div id="preview-box">
         <video id="v" autoplay playsinline muted></video>
     </div>
     
-    <button class="btn btn-alt" onclick="switchCamera()">↺ Switch Lens (Use Main Camera)</button>
-
     <div class="monitor-box">
-        <div id="status" style="font-size: 14px; font-weight: bold;">01:00</div>
+        <div id="status">READY</div>
         <div class="glucose-now" id="gluNow">--</div>
         
         <div class="progress-bar"><div id="progressFill"></div></div>
-        <div id="stabLabel" style="font-size: 10px; color: #888; text-align: left;">SIGNAL STABILITY</div>
-        <div class="stability-bar"><div id="stabilityFill"></div></div>
+        <span class="thermal-label" id="thermalStatus">COOLING SYSTEM ACTIVE</span>
     </div>
 
-    <button class="btn" id="scanBtn" onclick="runAnalysis()">START 60s SCAN</button>
+    <button class="btn" id="scanBtn" onclick="runPulsedAnalysis()">START PULSED 60s SCAN</button>
 
     <div style="margin: 20px 0;">
         <input type="number" id="calRef" placeholder="Meter mg/dL" style="padding:10px; width:100px; border-radius:8px; border:none; background:#1a1a1a; color:white;">
         <button onclick="syncCal()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:8px; font-weight:bold; cursor:pointer;">Sync</button>
     </div>
-
-    <div id="resultLogs" style="background:#111; border-radius:15px; padding:10px;"></div>
 </div>
 
 <canvas id="c" width="50" height="50" style="display:none;"></canvas>
@@ -72,137 +60,113 @@
     const ctx = c.getContext('2d', {willReadFrequently: true});
     
     let currentStream = null;
-    let useAlternativeCamera = false;
     let calibration = JSON.parse(localStorage.getItem('smart_strip_haptic')) || { bInt: 220, bGlu: 100, sens: 5.5 };
     let buffer = [];
-    let lastInt = 0;
     const SCAN_TIME = 60000;
 
-    // Enhanced Camera Initialization
-    async function initCamera() {
-        if (currentStream) {
-            currentStream.getTracks().forEach(track => track.stop());
-        }
+    window.onload = async () => {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const constraints = { video: { deviceId: videoDevices[videoDevices.length - 1].deviceId, facingMode: 'environment' } };
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        v.srcObject = currentStream;
+    };
 
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
-            
-            // Selection logic: Pick the last camera in the list (usually the primary high-res lens on back)
-            // or toggle if button is pressed.
-            let deviceId = useAlternativeCamera ? videoDevices[0].deviceId : videoDevices[videoDevices.length - 1].deviceId;
-
-            const constraints = {
-                video: {
-                    deviceId: { exact: deviceId },
-                    facingMode: 'environment',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
-                }
-            };
-
-            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-            v.srcObject = currentStream;
-        } catch (e) {
-            // Fallback to general environment camera if exact deviceId fails
-            currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            v.srcObject = currentStream;
-        }
-    }
-
-    function switchCamera() {
-        useAlternativeCamera = !useAlternativeCamera;
-        initCamera();
-    }
-
-    async function runAnalysis() {
+    async function toggleFlash(state) {
         const track = currentStream.getVideoTracks()[0];
         const capabilities = track.getCapabilities();
-        
-        // Auto-Torch
         if (capabilities.torch) {
-            await track.applyConstraints({ advanced: [{ torch: true }] });
+            try {
+                await track.applyConstraints({ advanced: [{ torch: state }] });
+            } catch (e) { console.log("Flash control error"); }
         }
+    }
 
+    async function runPulsedAnalysis() {
         document.getElementById('scanBtn').disabled = true;
         buffer = [];
         const start = Date.now();
-
-        const timer = setInterval(() => {
+        
+        // HEART OF THE THERMAL LOGIC
+        // We pulse the flash: 2 seconds ON (Capture), 1 second OFF (Cooling)
+        const pulseCycle = async () => {
             const elapsed = Date.now() - start;
-            const progress = elapsed / SCAN_TIME;
-            
-            document.getElementById('progressFill').style.width = (progress * 100) + "%";
-            const sec = Math.ceil((SCAN_TIME - elapsed) / 1000);
-            document.getElementById('status').innerText = `00:${sec.toString().padStart(2, '0')}`;
-
-            ctx.drawImage(v, 0, 0, 50, 50);
-            const pix = ctx.getImageData(0, 0, 50, 50).data;
-            let red = 0;
-            for (let i = 0; i < pix.length; i += 4) red += pix[i];
-            const intensity = red / (pix.length / 4);
-
-            // Stability check
-            if (lastInt > 0) {
-                const variance = Math.abs(intensity - lastInt);
-                const stability = Math.max(0, 100 - (variance * 15));
-                document.getElementById('stabilityFill').style.width = stability + "%";
-                
-                if (stability < 60) {
-                    document.getElementById('stabLabel').className = "alert-active";
-                    if (navigator.vibrate) navigator.vibrate(50);
-                } else {
-                    document.getElementById('stabLabel').className = "";
-                }
-            }
-            
-            if (intensity > 30) buffer.push(intensity);
-            lastInt = intensity;
-
             if (elapsed >= SCAN_TIME) {
-                clearInterval(timer);
+                await toggleFlash(false);
                 finishAnalysis();
-                if (capabilities.torch) track.applyConstraints({ advanced: [{ torch: false }] });
+                return;
             }
-        }, 100);
+
+            // UI Updates
+            const progress = (elapsed / SCAN_TIME) * 100;
+            document.getElementById('progressFill').style.width = progress + "%";
+            document.getElementById('status').innerText = `ANALYZING... ${Math.ceil((SCAN_TIME - elapsed)/1000)}s`;
+
+            // FLASH ON - DATA CAPTURE
+            document.getElementById('thermalStatus').innerText = "FLASH ACTIVE: CAPTURING DATA";
+            document.getElementById('thermalStatus').style.color = "#ff5252";
+            await toggleFlash(true);
+            
+            // Wait 2 seconds while capturing
+            let captureCount = 0;
+            const captureInterval = setInterval(() => {
+                ctx.drawImage(v, 0, 0, 50, 50);
+                const pix = ctx.getImageData(0, 0, 50, 50).data;
+                let red = 0;
+                for (let i = 0; i < pix.length; i += 4) red += pix[i];
+                const intensity = red / (pix.length / 4);
+                if (intensity > 30) buffer.push(intensity);
+                captureCount++;
+                if (captureCount > 20) clearInterval(captureInterval);
+            }, 100);
+
+            await new Promise(r => setTimeout(r, 2000));
+
+            // FLASH OFF - COOLING
+            document.getElementById('thermalStatus').innerText = "COOLING SENSOR... PAUSING";
+            document.getElementById('thermalStatus').style.color = "#ffa000";
+            await toggleFlash(false);
+            
+            await new Promise(r => setTimeout(r, 1000)); // 1 second cooling break
+            
+            pulseCycle(); // Next Cycle
+        };
+
+        pulseCycle();
     }
 
     function finishAnalysis() {
-        if (buffer.length < 300) {
-            alert("Insufficient signal. Ensure finger covers the main lens and flash.");
+        if (buffer.length < 100) {
+            alert("Analysis failed. Finger moved during pulse.");
             resetUI();
             return;
         }
+        
         buffer.sort((a,b) => a-b);
         const clean = buffer.slice(Math.floor(buffer.length*0.3), Math.floor(buffer.length*0.7));
         const avgInt = clean.reduce((a,b) => a+b) / clean.length;
         const glu = Math.round(calibration.bGlu + (calibration.bInt - avgInt) * calibration.sens);
         
-        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-        
-        const time = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        const log = `<div class="log-entry"><span>${time}</span><b>${glu} mg/dL</b></div>`;
-        document.getElementById('resultLogs').innerHTML = log + document.getElementById('resultLogs').innerHTML;
         document.getElementById('gluNow').innerText = glu;
+        document.getElementById('thermalStatus').innerText = "SCAN COMPLETE - SENSOR COOL";
+        document.getElementById('thermalStatus').style.color = "#00e676";
         resetUI();
     }
 
     function syncCal() {
         const real = parseFloat(document.getElementById('calRef').value);
-        if (!real || lastInt < 30) return alert("Please finish a steady scan first.");
-        calibration.bInt = lastInt;
+        if (!real || buffer.length === 0) return alert("Run a scan first.");
+        const lastAvg = buffer.reduce((a,b)=>a+b)/buffer.length;
+        calibration.bInt = lastAvg;
         calibration.bGlu = real;
         localStorage.setItem('smart_strip_haptic', JSON.stringify(calibration));
-        alert("Synced!");
+        alert("Synced at Baseline: " + lastAvg.toFixed(2));
     }
 
     function resetUI() {
         document.getElementById('scanBtn').disabled = false;
         document.getElementById('progressFill').style.width = "0%";
-        document.getElementById('status').innerText = "01:00";
     }
-
-    window.onload = initCamera;
 </script>
 </body>
 </html>
