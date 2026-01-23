@@ -1,50 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Accuracy Fix</title>
+    <title>Smart Strip - Haptic Pulse</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
-        .container { max-width: 500px; margin: auto; }
-        #preview-box { width: 140px; height: 140px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .monitor-box { background: #1a1a1a; padding: 25px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
-        .glucose-val { font-size: 72px; color: #00e676; font-weight: bold; }
-        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; }
-        #progressFill { width: 0%; height: 100%; background: #00e676; }
-        .btn { padding: 16px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-bottom: 8px; }
-        .btn-scan { background: #00e676; color: #000; }
-        .btn-util { background: #333; color: #fff; font-size: 12px; }
-        #log { text-align: left; background: #111; padding: 15px; border-radius: 10px; font-size: 14px; margin-top: 10px; border: 1px solid #222; }
+        #preview-box { width: 120px; height: 120px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+        
+        /* Heartbeat Visualizer */
+        canvas#pulseLine { width: 100%; height: 80px; background: #111; border-radius: 10px; margin: 10px 0; border: 1px solid #222; }
+
+        .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; }
+        .glucose-val { font-size: 64px; color: #00e676; font-weight: bold; }
+        
+        .progress-bar { width: 100%; height: 12px; background: #333; border-radius: 6px; margin: 10px 0; overflow: hidden; border: 1px solid #444; }
+        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
+
+        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; box-shadow: 0 4px 15px rgba(0,230,118,0.2); }
+        .btn:disabled { background: #222; color: #555; box-shadow: none; }
+        
+        .phase-text { font-size: 12px; color: #2196f3; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Precision Calibration</h2>
+    <h2 style="color:#00e676; margin-bottom: 5px;">Deep Precision Scan</h2>
     <div id="preview-box"><video id="v" autoplay playsinline muted></video></div>
     
-    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
-        <button class="btn btn-util" onclick="toggleLens()">↺ Switch Lens</button>
-        <button id="torchBtn" class="btn btn-util" onclick="manualFlashControl()">🔦 Flash</button>
-    </div>
-
     <div class="monitor-box">
-        <div style="font-size: 12px; color: #888; letter-spacing: 1px;">CURRENT ESTIMATE</div>
+        <div class="phase-text" id="phaseDisplay">SYSTEM READY</div>
+        <canvas id="pulseLine"></canvas>
         <div class="glucose-val" id="gluVal">--</div>
-        <div id="status" style="font-size: 12px; color: #2196f3;">READY</div>
         <div class="progress-bar"><div id="progressFill"></div></div>
+        <div id="timerDisplay" style="font-size: 18px; font-weight: bold; color: #888;">01:00</div>
     </div>
 
-    <button class="btn btn-scan" id="scanBtn" onclick="startScan()">START 60s SCAN</button>
-
-    <div style="margin: 15px 0; padding: 15px; background: #1a1a1a; border-radius: 15px;">
-        <span style="font-size: 12px; color: #888;">FORCE SYNC: </span>
-        <input type="number" id="manualGlu" placeholder="Real mg/dL" style="padding:10px; width:100px; border-radius:5px; border:none; background:#000; color:#fff;">
-        <button onclick="hardSync()" style="background:#2196f3; color:#fff; border:none; padding:10px; border-radius:5px; cursor:pointer;">Set Baseline</button>
-    </div>
-
-    <div id="log">History will appear here...</div>
+    <button class="btn" id="scanBtn" onclick="runHeartbeatScan()">START 60s PRECISION SCAN</button>
+    <button onclick="toggleLens()" style="background:none; border:none; color:#555; margin-top:15px; cursor:pointer;">↺ Switch Lens</button>
 </div>
 
 <canvas id="c" width="50" height="50" style="display:none;"></canvas>
@@ -53,108 +47,95 @@
     const v = document.getElementById('v');
     const c = document.getElementById('c');
     const ctx = c.getContext('2d');
+    const pLine = document.getElementById('pulseLine');
+    const pCtx = pLine.getContext('2d');
     
-    let currentStream = null;
-    let cameraIdx = 0;
-    let videoDevices = [];
-    let torchOn = false;
-    let buffer = [];
-    let lastInt = 0;
-    
-    // STARTING POINT: If values are -20, your baseline intensity is way off.
-    // We will reset this during the 'hardSync'.
-    let calibration = JSON.parse(localStorage.getItem('smart_v7_cal')) || { bInt: 200, bGlu: 100, sens: 5.5 };
+    let stream = null, devices = [], cameraIdx = 0;
+    let buffer = [], pulseData = [];
+    let cal = JSON.parse(localStorage.getItem('smart_v9')) || { bInt: 220, bGlu: 100, sens: 4.5 };
 
-    async function initCamera() {
-        if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        videoDevices = devices.filter(d => d.kind === 'videoinput');
+    async function init() {
+        const d = await navigator.mediaDevices.enumerateDevices();
+        devices = d.filter(i => i.kind === 'videoinput');
         try {
-            const constraints = { video: { deviceId: { exact: videoDevices[cameraIdx].deviceId }, facingMode: 'environment' } };
-            currentStream = await navigator.mediaDevices.getUserMedia(constraints);
-            v.srcObject = currentStream;
-        } catch (e) {
-            currentStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            v.srcObject = currentStream;
-        }
+            stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: devices[cameraIdx].deviceId }, facingMode: 'environment' } });
+            v.srcObject = stream;
+        } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
     }
 
-    async function manualFlashControl() {
-        const track = currentStream.getVideoTracks()[0];
-        try {
-            torchOn = !torchOn;
-            await track.applyConstraints({ advanced: [{ torch: torchOn }] });
-            document.getElementById('torchBtn').style.background = torchOn ? "#ffa000" : "#333";
-        } catch(e) { alert("Flash not supported on this lens."); }
-    }
+    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; init(); }
 
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % videoDevices.length;
-        initCamera();
-    }
+    async function runHeartbeatScan() {
+        const track = stream.getVideoTracks()[0];
+        if (track.getCapabilities().torch) await track.applyConstraints({ advanced: [{ torch: true }] });
 
-    async function startScan() {
         document.getElementById('scanBtn').disabled = true;
-        buffer = [];
+        buffer = []; pulseData = [];
         const start = Date.now();
+
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            document.getElementById('progressFill').style.width = (elapsed / 60000 * 100) + "%";
-            document.getElementById('status').innerText = `Capturing... ${Math.ceil((60000 - elapsed)/1000)}s`;
+            const progress = (elapsed / 60000) * 100;
+            document.getElementById('progressFill').style.width = progress + "%";
+            document.getElementById('timerDisplay').innerText = `00:${Math.ceil((60000-elapsed)/1000).toString().padStart(2,'0')}`;
 
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
-            let red = 0;
-            for (let i = 0; i < pix.length; i += 4) red += pix[i];
-            const intensity = red / (pix.length / 4);
-            
-            if (elapsed > 5000 && intensity > 10) {
+            let r = 0;
+            for(let i=0; i<pix.length; i+=4) r += pix[i];
+            const intensity = r / (pix.length/4);
+
+            // Phase Logic
+            if (elapsed < 10000) {
+                document.getElementById('phaseDisplay').innerText = "Phase 1: Warming Up...";
+                document.getElementById('phaseDisplay').style.color = "#ffa000";
+            } else {
+                if (elapsed < 10200 && navigator.vibrate) navigator.vibrate(200); // Pulse at 10s
+                document.getElementById('phaseDisplay').innerText = "Phase 2: Deep Analysis";
+                document.getElementById('phaseDisplay').style.color = "#00e676";
                 buffer.push(intensity);
-                lastInt = intensity;
             }
+
+            // Visualizer Logic
+            pulseData.push(intensity);
+            if(pulseData.length > 50) pulseData.shift();
+            drawPulse();
 
             if (elapsed >= 60000) {
                 clearInterval(timer);
+                if (track.getCapabilities().torch) track.applyConstraints({ advanced: [{ torch: false }] });
+                if (navigator.vibrate) navigator.vibrate([200, 100, 200]); // Done vibration
                 finishAnalysis();
             }
         }, 100);
     }
 
+    function drawPulse() {
+        pCtx.clearRect(0,0, pLine.width, pLine.height);
+        pCtx.beginPath();
+        pCtx.strokeStyle = "#00e676";
+        pCtx.lineWidth = 2;
+        const max = Math.max(...pulseData);
+        const min = Math.min(...pulseData);
+        const range = max - min || 1;
+        pulseData.forEach((p, i) => {
+            const x = (i / 50) * pLine.width;
+            const y = pLine.height - ((p - min) / range * pLine.height);
+            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
+        });
+        pCtx.stroke();
+    }
+
     function finishAnalysis() {
-        if (buffer.length < 100) { alert("Error: Signal too weak."); resetUI(); return; }
-        
         buffer.sort((a,b) => a-b);
-        const cleanAvg = buffer.slice(Math.floor(buffer.length*0.2), Math.floor(buffer.length*0.8)).reduce((a,b)=>a+b) / (buffer.length*0.6);
-        
-        // ACCURACY FORMULA: Result = Baseline + (Difference * Sensitivity)
-        let result = Math.round(calibration.bGlu + (calibration.bInt - cleanAvg) * calibration.sens);
-        
-        // Safety Catch: Glucose cannot be negative or impossibly low
-        if (result < 40) result = "Check Finger Position"; 
-
-        document.getElementById('gluVal').innerText = result;
-        const entry = `<div>${new Date().toLocaleTimeString()}: <b>${result} mg/dL</b></div>`;
-        document.getElementById('log').innerHTML = entry + document.getElementById('log').innerHTML;
-        resetUI();
-    }
-
-    function hardSync() {
-        const real = parseFloat(document.getElementById('manualGlu').value);
-        if (!real || lastInt < 10) return alert("Run a scan first to get an intensity reading!");
-        
-        // THIS FIXES THE ACCURACY: It sets the current light level as the "New Truth"
-        calibration.bInt = lastInt;
-        calibration.bGlu = real;
-        localStorage.setItem('smart_v7_cal', JSON.stringify(calibration));
-        alert("System Calibrated to " + real + " mg/dL at Intensity " + lastInt.toFixed(1));
-    }
-
-    function resetUI() {
+        const avgInt = buffer.slice(Math.floor(buffer.length*0.3), Math.floor(buffer.length*0.7)).reduce((a,b)=>a+b) / (buffer.length*0.4);
+        const res = Math.round(cal.bGlu + (cal.bInt - avgInt) * cal.sens);
+        document.getElementById('gluVal').innerText = res;
         document.getElementById('scanBtn').disabled = false;
-        document.getElementById('status').innerText = "DONE";
+        document.getElementById('phaseDisplay').innerText = "SCAN COMPLETE";
     }
 
-    window.onload = initCamera;
+    window.onload = init;
 </script>
 </body>
 </html>
