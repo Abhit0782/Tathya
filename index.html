@@ -1,236 +1,152 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Professional Analyzer</title>
+    <title>Smart Strip - Live Real-Time Analyzer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#0f0f0f">
-    <link rel="manifest" href="manifest.json">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; padding: 20px; line-height: 1.6; }
-        .container { max-width: 900px; margin: auto; }
-        .dashboard { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
-        .card { flex: 1; min-width: 300px; background: #1a1a1a; padding: 25px; border-radius: 15px; border: 1px solid #333; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
+        .container { max-width: 600px; margin: auto; }
         
-        .result-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 15px; }
-        .intensity-val { font-size: 32px; color: #2196f3; font-weight: bold; }
-        .glucose-val { font-size: 48px; color: #00e676; font-weight: bold; }
+        /* Live Video Preview - Small & Discreet */
+        #video-container { position: relative; width: 120px; height: 120px; margin: 10px auto; border-radius: 50%; overflow: hidden; border: 3px solid #00e676; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        /* Glucose Display */
+        .live-display { background: #1a1a1a; padding: 20px; border-radius: 20px; margin: 15px 0; border: 1px solid #333; }
+        .glucose-val { font-size: 64px; color: #00e676; font-weight: bold; font-family: monospace; }
+        .intensity-sub { color: #2196f3; font-size: 18px; }
+
+        /* Real-Time Pulse Graph */
+        canvas#pulseGraph { width: 100%; height: 100px; background: #000; border-radius: 10px; margin: 10px 0; }
+
+        .btn { padding: 15px 30px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; margin: 5px; width: 100%; font-size: 16px; }
+        .btn-start { background: #00e676; color: #000; }
+        .btn-calib { background: #1a237e; color: white; }
         
-        .graph-area { width: 100%; height: 100px; background: #000; margin-top: 15px; position: relative; border-radius: 8px; overflow: hidden; border: 1px solid #222; }
-        .dot { width: 2px; height: 2px; position: absolute; background: #00e676; }
-        
-        .calibration-zone { background: #1a237e; padding: 20px; border-radius: 15px; margin-top: 20px; border: 1px solid #3949ab; }
-        input[type="number"] { background: #000; color: #fff; border: 1px solid #3949ab; padding: 10px; border-radius: 5px; width: 120px; font-size: 16px; }
-        .btn { padding: 10px 20px; border-radius: 5px; border: none; cursor: pointer; font-weight: bold; transition: 0.3s; }
-        .btn-sync { background: #00e676; color: #000; }
-        .btn-upload { background: #333; color: white; display: block; width: 100%; margin: 10px 0; }
-        video, canvas { display: none; }
+        .history { text-align: left; font-size: 12px; background: #111; padding: 10px; border-radius: 10px; max-height: 150px; overflow-y: auto; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1 style="text-align:center; color:#00e676;">Smart Strip Prototype</h1>
+    <h2 style="color:#00e676; margin-bottom:5px;">Smart Strip LIVE</h2>
     
-    <div class="dashboard">
-        <div class="card">
-            <h3 style="color:#2196f3;">Fasting Analysis (Baseline)</h3>
-            <input type="file" class="btn-upload" accept="video/*" capture="environment" onchange="processVideo(this, 'fasting')">
-            
-            <div class="result-label">Light Intensity</div>
-            <div class="intensity-val" id="f-int">--</div>
-            
-            <div class="result-label">Glucose (mg/dL)</div>
-            <div class="glucose-val" id="f-glu">--</div>
-            
-            <div class="graph-area" id="f-graph"></div>
-        </div>
-
-        <div class="card">
-            <h3 style="color:#ffa000;">After Food Analysis</h3>
-            <input type="file" class="btn-upload" accept="video/*" capture="environment" onchange="processVideo(this, 'meal')">
-            
-            <div class="result-label">Light Intensity</div>
-            <div class="intensity-val" id="m-int">--</div>
-            
-            <div class="result-label">Glucose (mg/dL)</div>
-            <div class="glucose-val" id="m-glu">--</div>
-            
-            <div class="graph-area" id="m-graph"></div>
-        </div>
+    <div id="video-container">
+        <video id="liveVideo" autoplay playsinline muted></video>
     </div>
 
-    <div class="calibration-zone">
-        <h3>Calibration (Two-Point Accuracy)</h3>
-        <p>Enter real glucometer values for both fasting and after-food tests to calibrate the slope.</p>
-        <div style="display:flex; gap:10px; justify-content:center; margin-bottom:10px;">
-            <input type="number" id="realFastingGlu" placeholder="Real Fasting (e.g. 90)">
-            <input type="number" id="realMealGlu" placeholder="Real Meal (e.g. 140)">
-        </div>
-        <button class="btn btn-sync" onclick="calibrateAccuracy()">Sync & Calibrate</button>
-        <p style="font-size:12px; color:#9fa8da; margin-top:10px;">*Requires both videos to be processed first.</p>
+    <div class="live-display">
+        <div style="font-size: 12px; color: #888;">ESTIMATED GLUCOSE</div>
+        <div class="glucose-val" id="liveGlucose">--</div>
+        <div style="font-size: 12px; color: #888;">mg/dL</div>
+        <div class="intensity-sub">Intensity: <span id="liveInt">0.00</span></div>
     </div>
 
-    <div class="card" style="width:100%; margin-top:20px; box-sizing: border-box;">
-        <h3>History Log</h3>
-        <div id="history-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px; text-align: left; font-size: 14px;">
-            <!-- Logs go here -->
-        </div>
-        <button class="btn" style="background:#2196f3; color:white;" onclick="saveLog()">Save Today's Data</button>
-        <button class="btn" style="background:#d32f2f; color:white;" onclick="clearHistory()">Clear</button>
+    <canvas id="pulseGraph"></canvas>
+
+    <button class="btn btn-start" onclick="initCamera()">1. START LIVE SCAN</button>
+    
+    <div class="live-display" style="padding: 10px;">
+        <input type="number" id="calibRef" placeholder="Real Glucometer Value" style="padding:10px; width:60%; border-radius:5px; border:none;">
+        <button class="btn btn-calib" style="width:30%; padding:10px;" onclick="setBaseline()">Sync</button>
     </div>
+
+    <h3>History Log</h3>
+    <div class="history" id="log">No data yet. Scan and sync to save.</div>
 </div>
 
-<canvas id="procCanvas" width="50" height="50"></canvas>
+<canvas id="procCanvas" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    let readings = { fasting: 0, meal: 0 };
-    let calibration = {
-        intensity: 220, // Default baseline intensity
-        glucose: 100,    // Default baseline glucose
-        sensitivity: 4.5 // Default slope
-    };
+    const video = document.getElementById('liveVideo');
+    const procCanvas = document.getElementById('procCanvas');
+    const pCtx = procCanvas.getContext('2d', {willReadFrequently: true});
+    const pulseCanvas = document.getElementById('pulseGraph');
+    const gCtx = pulseCanvas.getContext('2d');
 
-    // Load saved calibration and history on startup
-    window.onload = function() {
-        if(localStorage.getItem('smartStrip_calib')) calibration = JSON.parse(localStorage.getItem('smartStrip_calib'));
-        renderHistory();
-    };
+    let calibration = JSON.parse(localStorage.getItem('live_calib')) || { baselineInt: 220, baselineGlu: 100, sensitivity: 4.5 };
+    let intensityHistory = [];
+    let isRunning = false;
 
-    const ctx = document.getElementById('procCanvas').getContext('2d');
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment', frameRate: { ideal: 30 } } 
+            });
+            video.srcObject = stream;
+            isRunning = true;
+            requestAnimationFrame(processLoop);
+        } catch (err) {
+            alert("Camera access denied. Please enable camera permissions.");
+        }
+    }
 
-    async function processVideo(input, type) {
-        const file = input.files[0];
-        if (!file) return;
+    function processLoop() {
+        if (!isRunning) return;
 
-        const video = document.createElement('video');
-        video.src = URL.createObjectURL(file);
-        video.muted = true;
+        // 1. Capture & Analyze Pixels
+        pCtx.drawImage(video, 0, 0, 50, 50);
+        const pix = pCtx.getImageData(0, 0, 50, 50).data;
+        let redSum = 0;
+        for (let i = 0; i < pix.length; i += 4) redSum += pix[i];
+        const currentInt = redSum / (pix.length / 4);
+
+        // 2. Add to smoothing history (Median Filter)
+        intensityHistory.push(currentInt);
+        if (intensityHistory.length > 30) intensityHistory.shift();
+
+        // 3. Filtered Average (Ignoring outliers)
+        const sorted = [...intensityHistory].sort((a,b) => a-b);
+        const filteredAvg = sorted[Math.floor(sorted.length / 2)]; // Median is more stable than average
+
+        // 4. Calculate Glucose
+        // Glucose = Baseline + (BaselineInt - CurrentInt) * Sensitivity
+        const glucose = calibration.baselineGlu + (calibration.baselineInt - filteredAvg) * calibration.sensitivity;
+
+        // 5. Update UI
+        document.getElementById('liveInt').innerText = filteredAvg.toFixed(2);
+        if (filteredAvg > 50) { // Only show if finger is detected
+            document.getElementById('liveGlucose').innerText = Math.round(glucose);
+        } else {
+            document.getElementById('liveGlucose').innerText = "PLACE FINGER";
+        }
+
+        drawPulse(intensityHistory);
+        requestAnimationFrame(processLoop);
+    }
+
+    function setBaseline() {
+        const real = parseFloat(document.getElementById('calibRef').value);
+        if (!real) return alert("Enter real glucometer value first!");
         
-        document.getElementById(type === 'fasting' ? 'f-int' : 'm-int').innerText = "Analyzing...";
-
-        video.onloadeddata = async () => {
-            video.currentTime = 1.5; // Skip shaky start
-            await video.play();
-            
-            let frames = 0, sum = 0, points = [];
-
-            const interval = setInterval(() => {
-                if (frames > 100 || video.ended) {
-                    clearInterval(interval);
-                    video.pause();
-                    const avg = sum / frames;
-                    readings[type] = avg;
-                    
-                    document.getElementById(type === 'fasting' ? 'f-int' : 'm-int').innerText = avg.toFixed(2);
-                    calculateGlucose();
-                    drawGraph(type, points);
-                    return;
-                }
-
-                ctx.drawImage(video, 0, 0, 50, 50);
-                const pix = ctx.getImageData(0, 0, 50, 50).data;
-                let red = 0;
-                for (let i = 0; i < pix.length; i += 4) red += pix[i];
-                let val = red / (pix.length / 4);
-                sum += val;
-                points.push(val);
-                frames++;
-            }, 30);
-        };
-    }
-
-    function calibrateAccuracy() {
-        const realFasting = parseFloat(document.getElementById('realFastingGlu').value);
-        const realMeal = parseFloat(document.getElementById('realMealGlu').value);
-
-        if (!readings.fasting || !readings.meal) {
-            alert("Please process both Fasting and After Food videos first.");
-            return;
-        }
+        calibration.baselineInt = parseFloat(document.getElementById('liveInt').innerText);
+        calibration.baselineGlu = real;
         
-        if (!realFasting || !realMeal) {
-            alert("Please enter real glucose values for both Fasting and After Food.");
-            return;
-        }
-
-        // S = (G_meal - G_fasting) / (I_fasting - I_meal)
-        const intensityDiff = readings.fasting - readings.meal;
-        const glucoseDiff = realMeal - realFasting;
-
-        if (Math.abs(intensityDiff) < 0.001) {
-            alert("Intensity difference too small. Ensure videos have different lighting/glucose levels.");
-            return;
-        }
-
-        calibration.sensitivity = glucoseDiff / intensityDiff;
-        calibration.glucose = realFasting;
-        localStorage.setItem('smartStrip_calib', JSON.stringify(calibration)); // Save calibration for future
-
-        alert("Calibration Successful! Sensitivity set to: " + calibration.sensitivity.toFixed(2));
-        calculateGlucose();
+        localStorage.setItem('live_calib', JSON.stringify(calibration));
+        
+        // Log the event
+        const entry = `<div>[${new Date().toLocaleTimeString()}] Synced: ${real}mg/dL at ${calibration.baselineInt} Int</div>`;
+        document.getElementById('log').innerHTML = entry + document.getElementById('log').innerHTML;
+        alert("Calibration Synced!");
     }
 
-    function calculateGlucose() {
-        if (readings.fasting) {
-            document.getElementById('f-glu').innerText = calibration.glucose;
-        }
-        if (readings.meal && readings.fasting) {
-            // Glucose = FastingGlucose + (FastingIntensity - MealIntensity) * Sensitivity
-            const mGlu = calibration.glucose + (readings.fasting - readings.meal) * calibration.sensitivity;
-            document.getElementById('m-glu').innerText = Math.round(mGlu);
-        }
-    }
+    function drawPulse(data) {
+        gCtx.clearRect(0, 0, pulseCanvas.width, pulseCanvas.height);
+        gCtx.beginPath();
+        gCtx.strokeStyle = '#00e676';
+        gCtx.lineWidth = 2;
+        
+        const max = Math.max(...data);
+        const min = Math.min(...data);
+        const range = max - min || 1;
 
-    function drawGraph(type, pts) {
-        const container = document.getElementById(type === 'fasting' ? 'f-graph' : 'm-graph');
-        container.innerHTML = '';
-        const max = Math.max(...pts), min = Math.min(...pts), range = (max - min) || 1;
-        pts.forEach((p, i) => {
-            const dot = document.createElement('div');
-            dot.className = 'dot';
-            dot.style.left = (i * (container.clientWidth / pts.length)) + 'px';
-            dot.style.bottom = (((p - min) / range) * 80 + 10) + 'px';
-            container.appendChild(dot);
+        data.forEach((p, i) => {
+            const x = (i / data.length) * pulseCanvas.width;
+            const y = pulseCanvas.height - ((p - min) / range * pulseCanvas.height);
+            if (i === 0) gCtx.moveTo(x, y);
+            else gCtx.lineTo(x, y);
         });
-    }
-
-    function saveLog() {
-        const fVal = document.getElementById('f-glu').innerText;
-        const mVal = document.getElementById('m-glu').innerText;
-        
-        if(fVal === '--' && mVal === '--') {
-            alert("No data to save!");
-            return;
-        }
-
-        const log = {
-            date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString(),
-            fasting: fVal,
-            meal: mVal
-        };
-
-        let history = JSON.parse(localStorage.getItem('smartStrip_history') || '[]');
-        history.push(log);
-        localStorage.setItem('smartStrip_history', JSON.stringify(history));
-        renderHistory();
-    }
-
-    function renderHistory() {
-        const history = JSON.parse(localStorage.getItem('smartStrip_history') || '[]');
-        const html = history.map(h => `<div style="border-bottom:1px solid #333; padding:8px; display:flex; justify-content:space-between;"><span>${h.date}</span> <span>F: <b style="color:#00e676">${h.fasting}</b></span> <span>PP: <b style="color:#ffa000">${h.meal}</b></span></div>`).reverse().join('');
-        document.getElementById('history-container').innerHTML = html || '<div style="color:#555; text-align:center; padding:10px;">No logs yet.</div>';
-    }
-
-    function clearHistory() {
-        if(confirm("Delete all history?")) {
-            localStorage.removeItem('smartStrip_history');
-            renderHistory();
-        }
-    }
-
-    // Register Service Worker for PWA (App-like behavior)
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js');
+        gCtx.stroke();
     }
 </script>
 </body>
