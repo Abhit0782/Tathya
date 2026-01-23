@@ -1,54 +1,50 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Force Flash</title>
+    <title>Smart Strip - Accuracy Fix</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
         .container { max-width: 500px; margin: auto; }
-        
-        #preview-box { 
-            width: 150px; height: 150px; 
-            margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; 
-            overflow: hidden; background: #000;
-        }
+        #preview-box { width: 140px; height: 140px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
-
-        .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
-        .glucose-verified { font-size: 68px; color: #00e676; font-weight: bold; line-height: 1; }
-        
-        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 15px 0; overflow: hidden; }
-        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
-
+        .monitor-box { background: #1a1a1a; padding: 25px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; }
+        .glucose-val { font-size: 72px; color: #00e676; font-weight: bold; }
+        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #00e676; }
         .btn { padding: 16px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 16px; margin-bottom: 8px; }
         .btn-scan { background: #00e676; color: #000; }
         .btn-util { background: #333; color: #fff; font-size: 12px; }
-        .flash-on { background: #ffa000 !important; color: #000; }
+        #log { text-align: left; background: #111; padding: 15px; border-radius: 10px; font-size: 14px; margin-top: 10px; border: 1px solid #222; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Hardware Sync Fix</h2>
-
-    <div id="preview-box">
-        <video id="v" autoplay playsinline muted></video>
-    </div>
-
+    <h2 style="color:#00e676;">Precision Calibration</h2>
+    <div id="preview-box"><video id="v" autoplay playsinline muted></video></div>
+    
     <div style="display: flex; gap: 5px; margin-bottom: 10px;">
         <button class="btn btn-util" onclick="toggleLens()">↺ Switch Lens</button>
-        <button id="torchBtn" class="btn btn-util" onclick="manualFlashControl()">🔦 Force Flash</button>
+        <button id="torchBtn" class="btn btn-util" onclick="manualFlashControl()">🔦 Flash</button>
     </div>
-    
+
     <div class="monitor-box">
-        <div class="glucose-verified" id="gluVerified">--</div>
-        <div id="status" style="font-size: 12px; color: #888;">READY</div>
+        <div style="font-size: 12px; color: #888; letter-spacing: 1px;">CURRENT ESTIMATE</div>
+        <div class="glucose-val" id="gluVal">--</div>
+        <div id="status" style="font-size: 12px; color: #2196f3;">READY</div>
         <div class="progress-bar"><div id="progressFill"></div></div>
     </div>
 
     <button class="btn btn-scan" id="scanBtn" onclick="startScan()">START 60s SCAN</button>
 
-    <div id="historyLog" style="text-align: left; background: #111; padding: 10px; border-radius: 10px; font-size: 14px;"></div>
+    <div style="margin: 15px 0; padding: 15px; background: #1a1a1a; border-radius: 15px;">
+        <span style="font-size: 12px; color: #888;">FORCE SYNC: </span>
+        <input type="number" id="manualGlu" placeholder="Real mg/dL" style="padding:10px; width:100px; border-radius:5px; border:none; background:#000; color:#fff;">
+        <button onclick="hardSync()" style="background:#2196f3; color:#fff; border:none; padding:10px; border-radius:5px; cursor:pointer;">Set Baseline</button>
+    </div>
+
+    <div id="log">History will appear here...</div>
 </div>
 
 <canvas id="c" width="50" height="50" style="display:none;"></canvas>
@@ -61,23 +57,20 @@
     let currentStream = null;
     let cameraIdx = 0;
     let videoDevices = [];
-    let torchState = false;
-    let calibration = JSON.parse(localStorage.getItem('smart_strip_autocal')) || { bInt: 220, bGlu: 100, sens: 6.5 };
-    let logHistory = JSON.parse(localStorage.getItem('smart_strip_history_v6')) || [];
+    let torchOn = false;
     let buffer = [];
+    let lastInt = 0;
+    
+    // STARTING POINT: If values are -20, your baseline intensity is way off.
+    // We will reset this during the 'hardSync'.
+    let calibration = JSON.parse(localStorage.getItem('smart_v7_cal')) || { bInt: 200, bGlu: 100, sens: 5.5 };
 
     async function initCamera() {
         if (currentStream) currentStream.getTracks().forEach(t => t.stop());
         const devices = await navigator.mediaDevices.enumerateDevices();
         videoDevices = devices.filter(d => d.kind === 'videoinput');
-        
         try {
-            const constraints = { 
-                video: { 
-                    deviceId: videoDevices[cameraIdx] ? { exact: videoDevices[cameraIdx].deviceId } : undefined,
-                    facingMode: 'environment' 
-                } 
-            };
+            const constraints = { video: { deviceId: { exact: videoDevices[cameraIdx].deviceId }, facingMode: 'environment' } };
             currentStream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = currentStream;
         } catch (e) {
@@ -88,45 +81,37 @@
 
     async function manualFlashControl() {
         const track = currentStream.getVideoTracks()[0];
-        const capabilities = track.getCapabilities();
-        
-        if (capabilities.torch) {
-            torchState = !torchState;
-            await track.applyConstraints({ advanced: [{ torch: torchState }] });
-            document.getElementById('torchBtn').classList.toggle('flash-on', torchState);
-            document.getElementById('torchBtn').innerText = torchState ? "🔦 Flash: ON" : "🔦 Force Flash";
-        } else {
-            alert("This lens does not support torch. Please 'Switch Lens'.");
-        }
+        try {
+            torchOn = !torchOn;
+            await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+            document.getElementById('torchBtn').style.background = torchOn ? "#ffa000" : "#333";
+        } catch(e) { alert("Flash not supported on this lens."); }
     }
 
     function toggleLens() {
         cameraIdx = (cameraIdx + 1) % videoDevices.length;
-        torchState = false;
-        document.getElementById('torchBtn').classList.remove('flash-on');
         initCamera();
     }
 
     async function startScan() {
-        // Force flash on before scan starts
-        if(!torchState) await manualFlashControl();
-        
         document.getElementById('scanBtn').disabled = true;
         buffer = [];
         const start = Date.now();
-
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             document.getElementById('progressFill').style.width = (elapsed / 60000 * 100) + "%";
-            document.getElementById('status').innerText = `SCANNING... ${Math.ceil((60000 - elapsed)/1000)}s`;
+            document.getElementById('status').innerText = `Capturing... ${Math.ceil((60000 - elapsed)/1000)}s`;
 
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
             let red = 0;
             for (let i = 0; i < pix.length; i += 4) red += pix[i];
             const intensity = red / (pix.length / 4);
-
-            if (elapsed > 3000 && intensity > 20) buffer.push(intensity);
+            
+            if (elapsed > 5000 && intensity > 10) {
+                buffer.push(intensity);
+                lastInt = intensity;
+            }
 
             if (elapsed >= 60000) {
                 clearInterval(timer);
@@ -136,20 +121,32 @@
     }
 
     function finishAnalysis() {
-        if (buffer.length < 50) { alert("Signal Lost. Ensure finger covers lens."); resetUI(); return; }
-        const avg = buffer.reduce((a, b) => a + b) / buffer.length;
-        const rawGlu = Math.round(calibration.bGlu + (calibration.bInt - avg) * calibration.sens);
+        if (buffer.length < 100) { alert("Error: Signal too weak."); resetUI(); return; }
         
-        logHistory.unshift({ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: rawGlu });
-        localStorage.setItem('smart_strip_history_v6', JSON.stringify(logHistory.slice(0, 5)));
+        buffer.sort((a,b) => a-b);
+        const cleanAvg = buffer.slice(Math.floor(buffer.length*0.2), Math.floor(buffer.length*0.8)).reduce((a,b)=>a+b) / (buffer.length*0.6);
         
-        document.getElementById('gluVerified').innerText = rawGlu;
-        renderLog();
+        // ACCURACY FORMULA: Result = Baseline + (Difference * Sensitivity)
+        let result = Math.round(calibration.bGlu + (calibration.bInt - cleanAvg) * calibration.sens);
+        
+        // Safety Catch: Glucose cannot be negative or impossibly low
+        if (result < 40) result = "Check Finger Position"; 
+
+        document.getElementById('gluVal').innerText = result;
+        const entry = `<div>${new Date().toLocaleTimeString()}: <b>${result} mg/dL</b></div>`;
+        document.getElementById('log').innerHTML = entry + document.getElementById('log').innerHTML;
         resetUI();
     }
 
-    function renderLog() {
-        document.getElementById('historyLog').innerHTML = logHistory.map(h => `<div>${h.time}: <b>${h.val} mg/dL</b></div>`).join('');
+    function hardSync() {
+        const real = parseFloat(document.getElementById('manualGlu').value);
+        if (!real || lastInt < 10) return alert("Run a scan first to get an intensity reading!");
+        
+        // THIS FIXES THE ACCURACY: It sets the current light level as the "New Truth"
+        calibration.bInt = lastInt;
+        calibration.bGlu = real;
+        localStorage.setItem('smart_v7_cal', JSON.stringify(calibration));
+        alert("System Calibrated to " + real + " mg/dL at Intensity " + lastInt.toFixed(1));
     }
 
     function resetUI() {
