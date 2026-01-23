@@ -1,152 +1,165 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Live Real-Time Analyzer</title>
+    <title>Smart Strip - Auto-Torch Analyzer</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
-        .container { max-width: 600px; margin: auto; }
+        .container { max-width: 500px; margin: auto; }
         
-        /* Live Video Preview - Small & Discreet */
-        #video-container { position: relative; width: 120px; height: 120px; margin: 10px auto; border-radius: 50%; overflow: hidden; border: 3px solid #00e676; }
-        video { width: 100%; height: 100%; object-fit: cover; }
+        .result-card { background: #1a1a1a; padding: 30px; border-radius: 25px; margin: 20px 0; border: 2px solid #333; transition: 0.5s; }
+        .glucose-display { font-size: 72px; color: #00e676; font-weight: bold; margin: 10px 0; }
+        .status-text { color: #2196f3; font-weight: bold; letter-spacing: 1px; }
 
-        /* Glucose Display */
-        .live-display { background: #1a1a1a; padding: 20px; border-radius: 20px; margin: 15px 0; border: 1px solid #333; }
-        .glucose-val { font-size: 64px; color: #00e676; font-weight: bold; font-family: monospace; }
-        .intensity-sub { color: #2196f3; font-size: 18px; }
+        /* Progress Bar */
+        .progress-container { width: 100%; background: #333; height: 10px; border-radius: 5px; margin: 20px 0; display: none; }
+        #progressBar { width: 0%; height: 100%; background: #00e676; border-radius: 5px; transition: 0.1s; }
 
-        /* Real-Time Pulse Graph */
-        canvas#pulseGraph { width: 100%; height: 100px; background: #000; border-radius: 10px; margin: 10px 0; }
-
-        .btn { padding: 15px 30px; border-radius: 10px; border: none; font-weight: bold; cursor: pointer; margin: 5px; width: 100%; font-size: 16px; }
-        .btn-start { background: #00e676; color: #000; }
-        .btn-calib { background: #1a237e; color: white; }
+        .intensity-tag { font-size: 14px; color: #666; }
+        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
         
-        .history { text-align: left; font-size: 12px; background: #111; padding: 10px; border-radius: 10px; max-height: 150px; overflow-y: auto; }
+        #video-preview { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid #333; margin-bottom: 10px; opacity: 0.5; }
+        .calibration-input { margin-top: 20px; padding: 15px; background: #111; border-radius: 10px; }
+        input { padding: 10px; border-radius: 5px; border: 1px solid #333; background: #000; color: #fff; width: 60px; text-align: center; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676; margin-bottom:5px;">Smart Strip LIVE</h2>
+    <h2 style="color:#00e676;">Smart Strip Scan</h2>
     
-    <div id="video-container">
-        <video id="liveVideo" autoplay playsinline muted></video>
-    </div>
+    <video id="liveVideo" autoplay playsinline muted id="video-preview" style="display:none;"></video>
 
-    <div class="live-display">
-        <div style="font-size: 12px; color: #888;">ESTIMATED GLUCOSE</div>
-        <div class="glucose-val" id="liveGlucose">--</div>
+    <div class="result-card" id="mainCard">
+        <div class="status-text" id="status">READY TO SCAN</div>
+        <div class="glucose-display" id="glucoseRes">--</div>
         <div style="font-size: 12px; color: #888;">mg/dL</div>
-        <div class="intensity-sub">Intensity: <span id="liveInt">0.00</span></div>
+        
+        <div class="progress-container" id="progCont">
+            <div id="progressBar"></div>
+        </div>
+
+        <div class="intensity-tag">Signal Intensity: <span id="intRes">0.0</span></div>
     </div>
 
-    <canvas id="pulseGraph"></canvas>
+    <button class="btn" id="startBtn" onclick="startAnalysis()">START 10s ANALYSIS</button>
 
-    <button class="btn btn-start" onclick="initCamera()">1. START LIVE SCAN</button>
-    
-    <div class="live-display" style="padding: 10px;">
-        <input type="number" id="calibRef" placeholder="Real Glucometer Value" style="padding:10px; width:60%; border-radius:5px; border:none;">
-        <button class="btn btn-calib" style="width:30%; padding:10px;" onclick="setBaseline()">Sync</button>
+    <div class="calibration-input">
+        <span style="font-size: 12px;">CALIBRATE: </span>
+        <input type="number" id="manualRef" placeholder="180">
+        <button onclick="syncCalibration()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:5px;">Sync Accuracy</button>
     </div>
-
-    <h3>History Log</h3>
-    <div class="history" id="log">No data yet. Scan and sync to save.</div>
 </div>
 
 <canvas id="procCanvas" width="50" height="50" style="display:none;"></canvas>
 
 <script>
     const video = document.getElementById('liveVideo');
+    const progressBar = document.getElementById('progressBar');
     const procCanvas = document.getElementById('procCanvas');
     const pCtx = procCanvas.getContext('2d', {willReadFrequently: true});
-    const pulseCanvas = document.getElementById('pulseGraph');
-    const gCtx = pulseCanvas.getContext('2d');
 
-    let calibration = JSON.parse(localStorage.getItem('live_calib')) || { baselineInt: 220, baselineGlu: 100, sensitivity: 4.5 };
-    let intensityHistory = [];
-    let isRunning = false;
+    let calibration = JSON.parse(localStorage.getItem('smart_strip_v7')) || { baselineInt: 220, baselineGlu: 100, sensitivity: 4.8 };
+    let stream = null;
+    let dataBuffer = [];
+    const SCAN_DURATION = 10000; // 10 seconds for deep analysis
 
-    async function initCamera() {
+    async function startAnalysis() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment', frameRate: { ideal: 30 } } 
+            // 1. Initialize Camera and Try to Open Flash
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment', torch: true } 
             });
             video.srcObject = stream;
-            isRunning = true;
-            requestAnimationFrame(processLoop);
+            
+            // Auto-torch for supported browsers
+            const track = stream.getVideoTracks()[0];
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                await track.applyConstraints({ advanced: [{ torch: true }] });
+            }
+
+            // 2. Reset UI
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('progCont').style.display = 'block';
+            document.getElementById('status').innerText = "STABILIZING FINGER...";
+            document.getElementById('glucoseRes').innerText = "---";
+            dataBuffer = [];
+
+            // 3. Begin Capture Loop
+            const startTime = Date.now();
+            const analysisInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const progress = (elapsed / SCAN_DURATION) * 100;
+                progressBar.style.width = progress + "%";
+
+                // Capture intensity
+                pCtx.drawImage(video, 0, 0, 50, 50);
+                const pix = pCtx.getImageData(0, 0, 50, 50).data;
+                let redSum = 0;
+                for (let i = 0; i < pix.length; i += 4) redSum += pix[i];
+                const currentInt = redSum / (pix.length / 4);
+                
+                if (currentInt > 50) { // Only collect if finger is present
+                    dataBuffer.push(currentInt);
+                    document.getElementById('intRes').innerText = currentInt.toFixed(1);
+                    document.getElementById('status').innerText = "ANALYZING BLOOD...";
+                } else {
+                    document.getElementById('status').innerText = "PLACE FINGER OVER FLASH";
+                }
+
+                if (elapsed >= SCAN_DURATION) {
+                    clearInterval(analysisInterval);
+                    finalizeAnalysis();
+                }
+            }, 50);
+
         } catch (err) {
-            alert("Camera access denied. Please enable camera permissions.");
+            alert("Please use a mobile browser and grant camera/torch permissions.");
         }
     }
 
-    function processLoop() {
-        if (!isRunning) return;
-
-        // 1. Capture & Analyze Pixels
-        pCtx.drawImage(video, 0, 0, 50, 50);
-        const pix = pCtx.getImageData(0, 0, 50, 50).data;
-        let redSum = 0;
-        for (let i = 0; i < pix.length; i += 4) redSum += pix[i];
-        const currentInt = redSum / (pix.length / 4);
-
-        // 2. Add to smoothing history (Median Filter)
-        intensityHistory.push(currentInt);
-        if (intensityHistory.length > 30) intensityHistory.shift();
-
-        // 3. Filtered Average (Ignoring outliers)
-        const sorted = [...intensityHistory].sort((a,b) => a-b);
-        const filteredAvg = sorted[Math.floor(sorted.length / 2)]; // Median is more stable than average
-
-        // 4. Calculate Glucose
-        // Glucose = Baseline + (BaselineInt - CurrentInt) * Sensitivity
-        const glucose = calibration.baselineGlu + (calibration.baselineInt - filteredAvg) * calibration.sensitivity;
-
-        // 5. Update UI
-        document.getElementById('liveInt').innerText = filteredAvg.toFixed(2);
-        if (filteredAvg > 50) { // Only show if finger is detected
-            document.getElementById('liveGlucose').innerText = Math.round(glucose);
-        } else {
-            document.getElementById('liveGlucose').innerText = "PLACE FINGER";
+    function finalizeAnalysis() {
+        if (dataBuffer.length < 50) {
+            alert("Insufficient data. Keep your finger steady on the flash.");
+            resetUI();
+            return;
         }
 
-        drawPulse(intensityHistory);
-        requestAnimationFrame(processLoop);
+        // 4. Intelligent Outlier Removal (Remove top and bottom 20% noise)
+        dataBuffer.sort((a,b) => a-b);
+        const trim = Math.floor(dataBuffer.length * 0.2);
+        const cleanData = dataBuffer.slice(trim, dataBuffer.length - trim);
+        const finalAvgInt = cleanData.reduce((a,b) => a+b) / cleanData.length;
+
+        // 5. Final Calculation
+        const finalGlucose = calibration.baselineGlu + (calibration.baselineInt - finalAvgInt) * calibration.sensitivity;
+
+        document.getElementById('glucoseRes').innerText = Math.round(finalGlucose);
+        document.getElementById('status').innerText = "ANALYSIS COMPLETE";
+        document.getElementById('progCont').style.display = 'none';
+        document.getElementById('startBtn').disabled = false;
+
+        // Auto-turn off torch
+        const track = stream.getVideoTracks()[0];
+        track.stop();
     }
 
-    function setBaseline() {
-        const real = parseFloat(document.getElementById('calibRef').value);
-        if (!real) return alert("Enter real glucometer value first!");
+    function syncCalibration() {
+        const real = parseFloat(document.getElementById('manualRef').value);
+        const currentInt = parseFloat(document.getElementById('intRes').innerText);
+        if (!real || currentInt < 50) return alert("Run a scan first!");
         
-        calibration.baselineInt = parseFloat(document.getElementById('liveInt').innerText);
+        calibration.baselineInt = currentInt;
         calibration.baselineGlu = real;
-        
-        localStorage.setItem('live_calib', JSON.stringify(calibration));
-        
-        // Log the event
-        const entry = `<div>[${new Date().toLocaleTimeString()}] Synced: ${real}mg/dL at ${calibration.baselineInt} Int</div>`;
-        document.getElementById('log').innerHTML = entry + document.getElementById('log').innerHTML;
-        alert("Calibration Synced!");
+        localStorage.setItem('smart_strip_v7', JSON.stringify(calibration));
+        alert("Accuracy Synchronized!");
     }
 
-    function drawPulse(data) {
-        gCtx.clearRect(0, 0, pulseCanvas.width, pulseCanvas.height);
-        gCtx.beginPath();
-        gCtx.strokeStyle = '#00e676';
-        gCtx.lineWidth = 2;
-        
-        const max = Math.max(...data);
-        const min = Math.min(...data);
-        const range = max - min || 1;
-
-        data.forEach((p, i) => {
-            const x = (i / data.length) * pulseCanvas.width;
-            const y = pulseCanvas.height - ((p - min) / range * pulseCanvas.height);
-            if (i === 0) gCtx.moveTo(x, y);
-            else gCtx.lineTo(x, y);
-        });
-        gCtx.stroke();
+    function resetUI() {
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('progCont').style.display = 'none';
+        document.getElementById('status').innerText = "READY";
     }
 </script>
 </body>
