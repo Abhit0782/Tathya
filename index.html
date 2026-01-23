@@ -1,139 +1,151 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Haptic Pulse</title>
+    <title>Smart Strip - Pro Sync</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
-        #preview-box { width: 120px; height: 120px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+        .container { max-width: 500px; margin: auto; }
+        #preview-box { width: 130px; height: 130px; margin: 10px auto; border-radius: 50%; border: 3px solid #00e676; overflow: hidden; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
         
-        /* Heartbeat Visualizer */
-        canvas#pulseLine { width: 100%; height: 80px; background: #111; border-radius: 10px; margin: 10px 0; border: 1px solid #222; }
-
-        .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; }
+        .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin-bottom: 15px; }
         .glucose-val { font-size: 64px; color: #00e676; font-weight: bold; }
         
-        .progress-bar { width: 100%; height: 12px; background: #333; border-radius: 6px; margin: 10px 0; overflow: hidden; border: 1px solid #444; }
-        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.1s linear; }
-
-        .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; box-shadow: 0 4px 15px rgba(0,230,118,0.2); }
-        .btn:disabled { background: #222; color: #555; box-shadow: none; }
+        /* Progress & History */
+        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #00e676; }
         
-        .phase-text { font-size: 12px; color: #2196f3; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; }
+        .sync-zone { background: #111; padding: 15px; border-radius: 15px; margin-top: 15px; border: 1px solid #222; }
+        .history-card { text-align: left; margin-top: 20px; background: #000; padding: 15px; border-radius: 15px; border: 1px solid #333; }
+        .log-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #222; font-size: 14px; }
+        
+        .btn-main { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
+        input { background: #1a1a1a; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 100px; text-align: center; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676; margin-bottom: 5px;">Deep Precision Scan</h2>
+    <h2 style="color:#00e676;">Smart Sync Pro</h2>
     <div id="preview-box"><video id="v" autoplay playsinline muted></video></div>
     
-    <div class="monitor-box">
-        <div class="phase-text" id="phaseDisplay">SYSTEM READY</div>
-        <canvas id="pulseLine"></canvas>
-        <div class="glucose-val" id="gluVal">--</div>
-        <div class="progress-bar"><div id="progressFill"></div></div>
-        <div id="timerDisplay" style="font-size: 18px; font-weight: bold; color: #888;">01:00</div>
+    <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+        <button class="btn-main" style="background:#333; color:#fff; font-size:12px; height:40px; padding:0;" onclick="toggleLens()">↺ Lens</button>
+        <button class="btn-main" style="background:#333; color:#fff; font-size:12px; height:40px; padding:0;" onclick="toggleFlash()">🔦 Flash</button>
     </div>
 
-    <button class="btn" id="scanBtn" onclick="runHeartbeatScan()">START 60s PRECISION SCAN</button>
-    <button onclick="toggleLens()" style="background:none; border:none; color:#555; margin-top:15px; cursor:pointer;">↺ Switch Lens</button>
+    <div class="monitor-box">
+        <div id="status" style="font-size: 11px; color: #888;">READY FOR 60s ANALYSIS</div>
+        <div class="glucose-val" id="gluVal">--</div>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+
+    <button class="btn-main" id="scanBtn" onclick="runScan()">START PRECISION SCAN</button>
+
+    <div class="sync-zone">
+        <div style="font-size: 12px; color: #2196f3; font-weight: bold; margin-bottom: 10px;">ACCURACY CALIBRATION</div>
+        <input type="number" id="actualMeter" placeholder="Meter mg/dL">
+        <button onclick="syncWithActual()" style="padding: 10px; border-radius: 8px; border: none; background: #2196f3; color: white; cursor: pointer; font-weight: bold;">SYNC</button>
+        <p style="font-size: 10px; color: #555; margin-top: 5px;">Scan first, then enter meter value to teach the app.</p>
+    </div>
+
+    <div class="history-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <b style="color: #00e676;">MOVEMENT LOG</b>
+            <button onclick="clearLogs()" style="background: none; border: none; color: #f44336; font-size: 10px; cursor: pointer;">CLEAR ALL</button>
+        </div>
+        <div id="historyLog"></div>
+    </div>
 </div>
 
 <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const v = document.getElementById('v');
-    const c = document.getElementById('c');
-    const ctx = c.getContext('2d');
-    const pLine = document.getElementById('pulseLine');
-    const pCtx = pLine.getContext('2d');
+    const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
+    let stream = null, devices = [], cameraIdx = 0, torch = false, buffer = [], lastInt = 0;
     
-    let stream = null, devices = [], cameraIdx = 0;
-    let buffer = [], pulseData = [];
-    let cal = JSON.parse(localStorage.getItem('smart_v9')) || { bInt: 220, bGlu: 100, sens: 4.5 };
+    // Load Calibration & History
+    let cal = JSON.parse(localStorage.getItem('smart_v11_cal')) || { bInt: 220, bGlu: 100, sens: 5.0 };
+    let logs = JSON.parse(localStorage.getItem('smart_v11_history')) || [];
 
     async function init() {
+        if (stream) stream.getTracks().forEach(t => t.stop());
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
         try {
             stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: devices[cameraIdx].deviceId }, facingMode: 'environment' } });
             v.srcObject = stream;
         } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
+        renderLogs();
+    }
+
+    async function toggleFlash() {
+        const track = stream.getVideoTracks()[0];
+        torch = !torch;
+        await track.applyConstraints({ advanced: [{ torch: torch }] });
     }
 
     function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; init(); }
 
-    async function runHeartbeatScan() {
-        const track = stream.getVideoTracks()[0];
-        if (track.getCapabilities().torch) await track.applyConstraints({ advanced: [{ torch: true }] });
-
+    async function runScan() {
+        if(!torch) await toggleFlash();
         document.getElementById('scanBtn').disabled = true;
-        buffer = []; pulseData = [];
+        buffer = [];
         const start = Date.now();
-
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            const progress = (elapsed / 60000) * 100;
-            document.getElementById('progressFill').style.width = progress + "%";
-            document.getElementById('timerDisplay').innerText = `00:${Math.ceil((60000-elapsed)/1000).toString().padStart(2,'0')}`;
+            document.getElementById('progressFill').style.width = (elapsed / 60000 * 100) + "%";
+            document.getElementById('status').innerText = `ANALYZING... ${Math.ceil((60000-elapsed)/1000)}s`;
 
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
-            let r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
+            let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
             const intensity = r / (pix.length/4);
 
-            // Phase Logic
-            if (elapsed < 10000) {
-                document.getElementById('phaseDisplay').innerText = "Phase 1: Warming Up...";
-                document.getElementById('phaseDisplay').style.color = "#ffa000";
-            } else {
-                if (elapsed < 10200 && navigator.vibrate) navigator.vibrate(200); // Pulse at 10s
-                document.getElementById('phaseDisplay').innerText = "Phase 2: Deep Analysis";
-                document.getElementById('phaseDisplay').style.color = "#00e676";
-                buffer.push(intensity);
-            }
-
-            // Visualizer Logic
-            pulseData.push(intensity);
-            if(pulseData.length > 50) pulseData.shift();
-            drawPulse();
+            if (elapsed > 10000 && intensity > 20) { buffer.push(intensity); lastInt = intensity; }
 
             if (elapsed >= 60000) {
                 clearInterval(timer);
-                if (track.getCapabilities().torch) track.applyConstraints({ advanced: [{ torch: false }] });
-                if (navigator.vibrate) navigator.vibrate([200, 100, 200]); // Done vibration
                 finishAnalysis();
             }
         }, 100);
     }
 
-    function drawPulse() {
-        pCtx.clearRect(0,0, pLine.width, pLine.height);
-        pCtx.beginPath();
-        pCtx.strokeStyle = "#00e676";
-        pCtx.lineWidth = 2;
-        const max = Math.max(...pulseData);
-        const min = Math.min(...pulseData);
-        const range = max - min || 1;
-        pulseData.forEach((p, i) => {
-            const x = (i / 50) * pLine.width;
-            const y = pLine.height - ((p - min) / range * pLine.height);
-            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
-        });
-        pCtx.stroke();
+    function finishAnalysis() {
+        if (buffer.length < 50) { alert("Check finger position!"); resetUI(); return; }
+        const avg = buffer.reduce((a,b)=>a+b)/buffer.length;
+        const res = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
+        
+        document.getElementById('gluVal').innerText = res;
+        
+        // Save Log
+        logs.unshift({ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: res });
+        if(logs.length > 15) logs.pop();
+        localStorage.setItem('smart_v11_history', JSON.stringify(logs));
+        
+        renderLogs();
+        resetUI();
     }
 
-    function finishAnalysis() {
-        buffer.sort((a,b) => a-b);
-        const avgInt = buffer.slice(Math.floor(buffer.length*0.3), Math.floor(buffer.length*0.7)).reduce((a,b)=>a+b) / (buffer.length*0.4);
-        const res = Math.round(cal.bGlu + (cal.bInt - avgInt) * cal.sens);
-        document.getElementById('gluVal').innerText = res;
-        document.getElementById('scanBtn').disabled = false;
-        document.getElementById('phaseDisplay').innerText = "SCAN COMPLETE";
+    function syncWithActual() {
+        const actual = parseFloat(document.getElementById('actualMeter').value);
+        if(!actual || lastInt < 20) return alert("Run a scan first, then sync.");
+        
+        // The "Smart" part: We anchor the current light intensity to your actual blood value
+        cal.bInt = lastInt;
+        cal.bGlu = actual;
+        localStorage.setItem('smart_v11_cal', JSON.stringify(cal));
+        alert("Synced! App is now calibrated to " + actual + " mg/dL");
+        renderLogs();
     }
+
+    function renderLogs() {
+        document.getElementById('historyLog').innerHTML = logs.length ? logs.map(l => `<div class="log-item"><span>${l.time}</span><b>${l.val} mg/dL</b></div>`).join('') : '<div style="color:#444; font-size:12px;">No logs yet.</div>';
+    }
+
+    function clearLogs() { if(confirm("Clear history?")) { logs = []; localStorage.removeItem('smart_v11_history'); renderLogs(); } }
+    function resetUI() { document.getElementById('scanBtn').disabled = false; document.getElementById('status').innerText = "DONE"; }
 
     window.onload = init;
 </script>
