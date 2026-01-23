@@ -1,165 +1,193 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Smart Strip - Auto-Torch Analyzer</title>
+    <title>Smart Strip - Haptic Precision</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; text-align: center; }
-        .container { max-width: 500px; margin: auto; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; margin: 0; padding: 15px; }
+        .container { max-width: 500px; margin: auto; text-align: center; }
         
-        .result-card { background: #1a1a1a; padding: 30px; border-radius: 25px; margin: 20px 0; border: 2px solid #333; transition: 0.5s; }
-        .glucose-display { font-size: 72px; color: #00e676; font-weight: bold; margin: 10px 0; }
-        .status-text { color: #2196f3; font-weight: bold; letter-spacing: 1px; }
+        #preview-box { 
+            width: 130px; height: 130px; 
+            margin: 10px auto; 
+            border-radius: 50%; 
+            border: 3px solid #00e676; 
+            overflow: hidden; 
+            background: #000;
+        }
+        video { width: 100%; height: 100%; object-fit: cover; }
 
-        /* Progress Bar */
-        .progress-container { width: 100%; background: #333; height: 10px; border-radius: 5px; margin: 20px 0; display: none; }
-        #progressBar { width: 0%; height: 100%; background: #00e676; border-radius: 5px; transition: 0.1s; }
+        .monitor-box { background: #1a1a1a; padding: 20px; border-radius: 20px; border: 1px solid #333; margin: 15px 0; position: relative;}
+        .glucose-now { font-size: 64px; color: #00e676; font-weight: bold; line-height: 1; margin: 10px 0; }
+        
+        /* Progress & Stability Bars */
+        .bar-label { font-size: 10px; color: #888; text-align: left; margin-bottom: 4px; display: block; }
+        .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-bottom: 15px; overflow: hidden; }
+        #progressFill { width: 0%; height: 100%; background: #00e676; transition: 0.2s linear; }
+        
+        .stability-bar { width: 100%; height: 4px; background: #333; border-radius: 2px; overflow: hidden; }
+        #stabilityFill { width: 100%; height: 100%; background: #00e676; transition: 0.3s; }
 
-        .intensity-tag { font-size: 14px; color: #666; }
         .btn { padding: 18px; border-radius: 12px; border: none; font-weight: bold; cursor: pointer; width: 100%; font-size: 18px; background: #00e676; color: #000; }
+        .btn:disabled { background: #333; color: #666; }
         
-        #video-preview { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid #333; margin-bottom: 10px; opacity: 0.5; }
-        .calibration-input { margin-top: 20px; padding: 15px; background: #111; border-radius: 10px; }
-        input { padding: 10px; border-radius: 5px; border: 1px solid #333; background: #000; color: #fff; width: 60px; text-align: center; }
+        .history-card { background: #111; border-radius: 15px; padding: 15px; margin-top: 20px; text-align: left; border: 1px solid #222; }
+        .log-entry { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #222; font-size: 14px; }
+        
+        .alert-active { color: #ff5252 !important; font-weight: bold; animation: blink 0.5s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2 style="color:#00e676;">Smart Strip Scan</h2>
-    
-    <video id="liveVideo" autoplay playsinline muted id="video-preview" style="display:none;"></video>
+    <h2 style="color:#00e676;">Precision Scan v2.0</h2>
 
-    <div class="result-card" id="mainCard">
-        <div class="status-text" id="status">READY TO SCAN</div>
-        <div class="glucose-display" id="glucoseRes">--</div>
-        <div style="font-size: 12px; color: #888;">mg/dL</div>
-        
-        <div class="progress-container" id="progCont">
-            <div id="progressBar"></div>
-        </div>
-
-        <div class="intensity-tag">Signal Intensity: <span id="intRes">0.0</span></div>
+    <div id="preview-box">
+        <video id="v" autoplay playsinline muted></video>
     </div>
 
-    <button class="btn" id="startBtn" onclick="startAnalysis()">START 10s ANALYSIS</button>
+    <div class="monitor-box">
+        <div id="status" style="font-size: 14px; font-weight: bold;">01:00</div>
+        <div class="glucose-now" id="gluNow">--</div>
+        
+        <span class="bar-label">SCAN PROGRESS</span>
+        <div class="progress-bar"><div id="progressFill"></div></div>
+        
+        <span class="bar-label" id="stabLabel">SIGNAL STABILITY</span>
+        <div class="stability-bar"><div id="stabilityFill"></div></div>
+    </div>
 
-    <div class="calibration-input">
-        <span style="font-size: 12px;">CALIBRATE: </span>
-        <input type="number" id="manualRef" placeholder="180">
-        <button onclick="syncCalibration()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:5px;">Sync Accuracy</button>
+    <button class="btn" id="scanBtn" onclick="runAnalysis()">START PRECISION SCAN</button>
+
+    <div style="margin: 20px 0;">
+        <input type="number" id="calRef" placeholder="Meter mg/dL" style="padding:10px; width:100px; border-radius:8px; border:none; background:#1a1a1a; color:white;">
+        <button onclick="syncCal()" style="background:#2196f3; color:white; border:none; padding:10px; border-radius:8px; font-weight:bold; cursor:pointer;">Sync</button>
+    </div>
+
+    <div class="history-card">
+        <div id="resultLogs"><div style="color:#444; text-align:center;">No records yet.</div></div>
     </div>
 </div>
 
-<canvas id="procCanvas" width="50" height="50" style="display:none;"></canvas>
+<canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const video = document.getElementById('liveVideo');
-    const progressBar = document.getElementById('progressBar');
-    const procCanvas = document.getElementById('procCanvas');
-    const pCtx = procCanvas.getContext('2d', {willReadFrequently: true});
+    const v = document.getElementById('v');
+    const c = document.getElementById('c');
+    const ctx = c.getContext('2d', {willReadFrequently: true});
+    
+    let calibration = JSON.parse(localStorage.getItem('smart_strip_haptic')) || { bInt: 220, bGlu: 100, sens: 5.5 };
+    let history = [];
+    let buffer = [];
+    let lastInt = 0;
+    const SCAN_TIME = 60000;
 
-    let calibration = JSON.parse(localStorage.getItem('smart_strip_v7')) || { baselineInt: 220, baselineGlu: 100, sensitivity: 4.8 };
-    let stream = null;
-    let dataBuffer = [];
-    const SCAN_DURATION = 10000; // 10 seconds for deep analysis
-
-    async function startAnalysis() {
+    window.onload = async () => {
         try {
-            // 1. Initialize Camera and Try to Open Flash
-            stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment', torch: true } 
-            });
-            video.srcObject = stream;
-            
-            // Auto-torch for supported browsers
-            const track = stream.getVideoTracks()[0];
-            const capabilities = track.getCapabilities();
-            if (capabilities.torch) {
-                await track.applyConstraints({ advanced: [{ torch: true }] });
-            }
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            v.srcObject = stream;
+        } catch (e) { document.getElementById('status').innerText = "CAMERA ERROR"; }
+    };
 
-            // 2. Reset UI
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('progCont').style.display = 'block';
-            document.getElementById('status').innerText = "STABILIZING FINGER...";
-            document.getElementById('glucoseRes').innerText = "---";
-            dataBuffer = [];
+    async function runAnalysis() {
+        try {
+            const track = v.srcObject.getVideoTracks()[0];
+            if (track.getCapabilities().torch) await track.applyConstraints({ advanced: [{ torch: true }] });
 
-            // 3. Begin Capture Loop
-            const startTime = Date.now();
-            const analysisInterval = setInterval(() => {
-                const elapsed = Date.now() - startTime;
-                const progress = (elapsed / SCAN_DURATION) * 100;
-                progressBar.style.width = progress + "%";
+            document.getElementById('scanBtn').disabled = true;
+            buffer = [];
+            const start = Date.now();
 
-                // Capture intensity
-                pCtx.drawImage(video, 0, 0, 50, 50);
-                const pix = pCtx.getImageData(0, 0, 50, 50).data;
-                let redSum = 0;
-                for (let i = 0; i < pix.length; i += 4) redSum += pix[i];
-                const currentInt = redSum / (pix.length / 4);
+            const timer = setInterval(() => {
+                const elapsed = Date.now() - start;
+                const progress = elapsed / SCAN_TIME;
                 
-                if (currentInt > 50) { // Only collect if finger is present
-                    dataBuffer.push(currentInt);
-                    document.getElementById('intRes').innerText = currentInt.toFixed(1);
-                    document.getElementById('status').innerText = "ANALYZING BLOOD...";
-                } else {
-                    document.getElementById('status').innerText = "PLACE FINGER OVER FLASH";
-                }
+                // Update Progress & Timer
+                document.getElementById('progressFill').style.width = (progress * 100) + "%";
+                const sec = Math.ceil((SCAN_TIME - elapsed) / 1000);
+                document.getElementById('status').innerText = `00:${sec.toString().padStart(2, '0')}`;
 
-                if (elapsed >= SCAN_DURATION) {
-                    clearInterval(analysisInterval);
-                    finalizeAnalysis();
-                }
-            }, 50);
+                // Process Frame
+                ctx.drawImage(v, 0, 0, 50, 50);
+                const pix = ctx.getImageData(0, 0, 50, 50).data;
+                let red = 0;
+                for (let i = 0; i < pix.length; i += 4) red += pix[i];
+                const intensity = red / (pix.length / 4);
 
-        } catch (err) {
-            alert("Please use a mobile browser and grant camera/torch permissions.");
-        }
+                // STABILITY CHECK
+                if (lastInt > 0) {
+                    const variance = Math.abs(intensity - lastInt);
+                    const stability = Math.max(0, 100 - (variance * 10)); // 0-100% scale
+                    
+                    document.getElementById('stabilityFill').style.width = stability + "%";
+                    
+                    if (stability < 70 || intensity < 40) {
+                        document.getElementById('stabLabel').className = "bar-label alert-active";
+                        document.getElementById('stabLabel').innerText = "STABILITY LOW - HOLD STILL!";
+                        document.getElementById('stabilityFill').style.background = "#ff5252";
+                        if (navigator.vibrate) navigator.vibrate(100); // Vibrate phone
+                    } else {
+                        document.getElementById('stabLabel').className = "bar-label";
+                        document.getElementById('stabLabel').innerText = "SIGNAL STABLE";
+                        document.getElementById('stabilityFill').style.background = "#00e676";
+                    }
+                }
+                
+                if (intensity > 40) buffer.push(intensity);
+                lastInt = intensity;
+
+                if (elapsed >= SCAN_TIME) {
+                    clearInterval(timer);
+                    finishAnalysis();
+                    if (track.getCapabilities().torch) track.applyConstraints({ advanced: [{ torch: false }] });
+                }
+            }, 100);
+        } catch (e) { alert("Error initializing scan."); resetUI(); }
     }
 
-    function finalizeAnalysis() {
-        if (dataBuffer.length < 50) {
-            alert("Insufficient data. Keep your finger steady on the flash.");
+    function finishAnalysis() {
+        if (buffer.length < 300) {
+            alert("Scan failed: Insufficient stable data.");
             resetUI();
             return;
         }
 
-        // 4. Intelligent Outlier Removal (Remove top and bottom 20% noise)
-        dataBuffer.sort((a,b) => a-b);
-        const trim = Math.floor(dataBuffer.length * 0.2);
-        const cleanData = dataBuffer.slice(trim, dataBuffer.length - trim);
-        const finalAvgInt = cleanData.reduce((a,b) => a+b) / cleanData.length;
+        buffer.sort((a,b) => a-b);
+        const clean = buffer.slice(Math.floor(buffer.length*0.3), Math.floor(buffer.length*0.7));
+        const avgInt = clean.reduce((a,b) => a+b) / clean.length;
+        const glu = Math.round(calibration.bGlu + (calibration.bInt - avgInt) * calibration.sens);
+        
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]); // Victory vibration
 
-        // 5. Final Calculation
-        const finalGlucose = calibration.baselineGlu + (calibration.baselineInt - finalAvgInt) * calibration.sensitivity;
-
-        document.getElementById('glucoseRes').innerText = Math.round(finalGlucose);
-        document.getElementById('status').innerText = "ANALYSIS COMPLETE";
-        document.getElementById('progCont').style.display = 'none';
-        document.getElementById('startBtn').disabled = false;
-
-        // Auto-turn off torch
-        const track = stream.getVideoTracks()[0];
-        track.stop();
+        history.unshift({ time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: glu });
+        document.getElementById('gluNow').innerText = glu;
+        renderLogs();
+        resetUI();
     }
 
-    function syncCalibration() {
-        const real = parseFloat(document.getElementById('manualRef').value);
-        const currentInt = parseFloat(document.getElementById('intRes').innerText);
-        if (!real || currentInt < 50) return alert("Run a scan first!");
-        
-        calibration.baselineInt = currentInt;
-        calibration.baselineGlu = real;
-        localStorage.setItem('smart_strip_v7', JSON.stringify(calibration));
-        alert("Accuracy Synchronized!");
+    function renderLogs() {
+        document.getElementById('resultLogs').innerHTML = history.map(h => `
+            <div class="log-entry">
+                <span>${h.time}</span>
+                <span><b>${h.val} mg/dL</b></span>
+            </div>
+        `).join('');
+    }
+
+    function syncCal() {
+        const real = parseFloat(document.getElementById('calRef').value);
+        if (!real || lastInt < 40) return alert("Run a clean scan first.");
+        calibration.bInt = lastInt;
+        calibration.bGlu = real;
+        localStorage.setItem('smart_strip_haptic', JSON.stringify(calibration));
+        alert("Calibration Synced!");
     }
 
     function resetUI() {
-        document.getElementById('startBtn').disabled = false;
-        document.getElementById('progCont').style.display = 'none';
-        document.getElementById('status').innerText = "READY";
+        document.getElementById('scanBtn').disabled = false;
+        document.getElementById('progressFill').style.width = "0%";
+        document.getElementById('status').innerText = "SCAN COMPLETE";
     }
 </script>
 </body>
