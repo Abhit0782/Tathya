@@ -6,24 +6,40 @@
     <style>
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 20px 0; display: flex; align-items: center; justify-content: center; }
+        
+        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
         .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
         .progress-ring__track { stroke: #222; }
+
         .inner-display { position: absolute; width: 200px; height: 200px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
-        #pulseGraph { position: absolute; width: 100%; height: 60px; bottom: 40px; pointer-events: none; }
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); z-index: 2; margin: 0; }
+        #pulseGraph { position: absolute; width: 100%; height: 50px; bottom: 35px; pointer-events: none; }
+        
+        .result-container { display: flex; align-items: baseline; z-index: 2; }
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; }
+        #trendArrow { font-size: 24px; margin-left: 5px; font-weight: bold; }
         .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 2; }
         .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 2; margin-bottom: 5px; }
-        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 20px; }
+
+        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
         .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
         .btn-small.active { background: #ffa000; color: #000; }
-        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 10px 20px rgba(0,230,118,0.2); }
-        .btn-main:disabled { background: #222; color: #444; box-shadow: none; }
+
+        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .btn-main:disabled { background: #222; color: #444; }
+
+        /* Calibration & Trend UI */
+        .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
+        #calBar { width: 10%; height: 100%; background: #f44336; transition: width 0.5s; }
+        .cal-label { font-size: 10px; color: #666; margin-top: 5px; text-transform: uppercase; }
+
+        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; }
+        #trendCanvas { width: 100%; height: 100px; margin-top: 10px; }
+
         .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
-        .log-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #222; font-size: 14px; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 80px; text-align: center; }
+        .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 70px; text-align: center; }
     </style>
 </head>
 <body>
@@ -39,9 +55,12 @@
 
         <div class="inner-display">
             <video id="v" autoplay playsinline muted></video>
-            <div id="phaseLabel" style="font-size: 10px; color: var(--blue); position: absolute; top: 45px; font-weight: bold;">READY</div>
+            <div id="phaseLabel" style="font-size: 10px; color: var(--blue); position: absolute; top: 40px; font-weight: bold;">READY</div>
             <div id="timer" class="timer-text">--</div>
-            <div id="gluResult" class="result-text">--</div>
+            <div class="result-container">
+                <div id="gluResult" class="result-text">--</div>
+                <div id="trendArrow"></div>
+            </div>
             <div class="unit-text">mg/dL</div>
             <canvas id="pulseGraph"></canvas>
         </div>
@@ -53,6 +72,14 @@
     </div>
 
     <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
+    
+    <div class="cal-bar-container"><div id="calBar"></div></div>
+    <div id="calText" class="cal-label">Learning Level: Initial</div>
+
+    <div class="trend-card">
+        <span style="font-size: 12px; font-weight: bold; color: var(--blue);">GLUCOSE TREND (LAST 10)</span>
+        <canvas id="trendCanvas"></canvas>
+    </div>
 
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
@@ -60,7 +87,7 @@
             <button onclick="syncCal()" style="background: var(--blue); border:none; color:white; padding:5px 15px; border-radius:5px; font-weight:bold;">SYNC</button>
         </div>
         <div style="display: flex; align-items: center; justify-content: space-between;">
-            <span style="font-size: 11px; color: #888;">Compare with your finger-prick:</span>
+            <span style="font-size: 11px; color: #888;">Enter finger-prick value:</span>
             <input type="number" id="meterVal" placeholder="100">
         </div>
     </div>
@@ -73,105 +100,101 @@
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    // --- 1. CONFIGURATION: PASTE YOUR GOOGLE URL BELOW ---
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/execE"; 
 
     const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
     const pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
     const clock = document.getElementById('clockProgress');
+    const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
-    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5 };
+    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
 
     async function init() {
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
-        const constraints = { 
-            video: { 
-                deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
-                facingMode: 'environment' 
-            } 
-        };
+        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
         try {
-            if(stream) stream.getTracks().forEach(track => track.stop());
+            if(stream) stream.getTracks().forEach(t => t.stop());
             stream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = stream;
-        } catch(e) { 
-            stream = await navigator.mediaDevices.getUserMedia({ video: true }); 
-            v.srcObject = stream; 
-        }
+        } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
+        updateCalBar();
+        drawTrend();
         renderLog();
+    }
+
+    function updateCalBar() {
+        const count = cal.syncCount || 0;
+        let pct = (count / 10) * 100;
+        document.getElementById('calBar').style.width = Math.min(pct, 100) + "%";
+        if(count < 3) { document.getElementById('calBar').style.background = "#f44336"; document.getElementById('calText').innerText = "Learning: Initial"; }
+        else if(count < 7) { document.getElementById('calBar').style.background = "#ffa000"; document.getElementById('calText').innerText = "Learning: Calibrating"; }
+        else { document.getElementById('calBar').style.background = "#00e676"; document.getElementById('calText').innerText = "Learning: Professional"; }
+    }
+
+    function drawTrend() {
+        if(history.length < 2) return;
+        tCanvas.width = tCanvas.offsetWidth;
+        tCanvas.height = 100;
+        tCtx.clearRect(0,0, tCanvas.width, tCanvas.height);
+        
+        const data = [...history].reverse();
+        const vals = data.map(h => h.val);
+        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
+        
+        tCtx.beginPath();
+        tCtx.strokeStyle = "#2196f3";
+        tCtx.lineWidth = 3;
+        tCtx.setLineDash([]);
+        
+        data.forEach((h, i) => {
+            const x = (i / (data.length - 1)) * tCanvas.width;
+            const y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
+            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
+            // Points
+            tCtx.fillStyle = "#fff";
+            tCtx.fillRect(x-2, y-2, 4, 4);
+        });
+        tCtx.stroke();
     }
 
     async function toggleFlash() {
         if(!stream) return;
         const track = stream.getVideoTracks()[0];
         const caps = track.getCapabilities ? track.getCapabilities() : {};
-        
-        if (!caps.torch) {
-            alert("This lens does not support flash. Please try ↺ LENS button.");
-            return;
-        }
-
+        if (!caps.torch) { alert("Switch lens for flash."); return; }
         torch = !torch;
-        try {
-            await track.applyConstraints({ advanced: [{ torch: torch }] });
-            document.getElementById('flashBtn').classList.toggle('active', torch);
-        } catch(e) {
-            console.error(e);
-            alert("Could not trigger flash. Ensure no other app is using the camera.");
-        }
+        try { await track.applyConstraints({ advanced: [{ torch: torch }] }); document.getElementById('flashBtn').classList.toggle('active', torch); } catch(e) {}
     }
 
     function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; init(); }
 
     function runAnalysis() {
-        if(!torch) { alert("Please turn on FLASH manually before scanning."); return; }
+        if(!torch) { alert("Turn on FLASH manually."); return; }
         document.getElementById('scanBtn').disabled = true;
-        document.getElementById('gluResult').innerText = "--";
         buffer = []; pulseArr = [];
-        const start = Date.now();
-        const duration = 45000; 
-        const circumference = 2 * Math.PI * 130;
-
+        const start = Date.now(), duration = 45000, circumference = 2 * Math.PI * 130;
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            const progress = elapsed / duration;
-            
-            clock.style.strokeDashoffset = circumference - (Math.min(progress,1) * circumference);
+            clock.style.strokeDashoffset = circumference - (Math.min(elapsed/duration,1) * circumference);
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
-
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
             let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
             const intensity = r / (pix.length/4);
-
-            if(elapsed < 5000) {
-                document.getElementById('phaseLabel').innerText = "CALIBRATING...";
-                document.getElementById('phaseLabel').style.color = "#ffa000";
-            } else {
-                document.getElementById('phaseLabel').innerText = "ANALYZING...";
-                document.getElementById('phaseLabel').style.color = "#00e676";
-                buffer.push(intensity);
-            }
-
-            pulseArr.push(intensity);
-            if(pulseArr.length > 60) pulseArr.shift();
+            if(elapsed < 5000) document.getElementById('phaseLabel').innerText = "WARMING UP...";
+            else { document.getElementById('phaseLabel').innerText = "SCANNING..."; buffer.push(intensity); }
+            pulseArr.push(intensity); if(pulseArr.length > 60) pulseArr.shift();
             drawWave();
-
-            if (elapsed >= duration) {
-                clearInterval(timer);
-                finishAnalysis();
-            }
+            if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
         }, 100);
     }
 
     function drawWave() {
         pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath();
-        pCtx.strokeStyle = "#00e676";
-        pCtx.lineWidth = 2;
+        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 2;
         const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
         pulseArr.forEach((p, i) => {
             const x = (i / 60) * pGraph.width;
@@ -187,41 +210,37 @@
         const avg = clean.reduce((a,b)=>a+b,0) / clean.length;
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
         
-        document.getElementById('gluResult').innerText = result;
-        document.getElementById('timer').innerText = "DONE";
-
-        const logEntry = { time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3) };
-        history.unshift(logEntry);
-        if(history.length > 10) history.pop();
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
-        
-        if(GOOGLE_SCRIPT_URL !== "PASTE_YOUR_URL_HERE") {
-            fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(logEntry) });
+        // Trend Arrow Logic
+        const arrow = document.getElementById('trendArrow');
+        if(history.length > 0) {
+            if(result > history[0].val + 5) { arrow.innerText = "↑"; arrow.style.color = "#f44336"; }
+            else if(result < history[0].val - 5) { arrow.innerText = "↓"; arrow.style.color = "#00e676"; }
+            else { arrow.innerText = "→"; arrow.style.color = "#aaa"; }
         }
-        renderLog();
-        resetUI();
+
+        document.getElementById('gluResult').innerText = result;
+        const logEntry = { time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: result, raw: avg.toFixed(3) };
+        history.unshift(logEntry); if(history.length > 10) history.pop();
+        localStorage.setItem('tathya_hist', JSON.stringify(history));
+        if(GOOGLE_SCRIPT_URL !== "PASTE_YOUR_URL_HERE") fetch(GOOGLE_SCRIPT_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(logEntry)});
+        renderLog(); drawTrend(); resetUI();
     }
 
     function syncCal() {
         const val = parseFloat(document.getElementById('meterVal').value);
-        if(!val || history.length < 1) return alert("Please scan first.");
+        if(!val || history.length < 1) return alert("Scan first.");
         const lastRaw = parseFloat(history[0].raw);
         if(history.length > 1) {
-            const prevRaw = parseFloat(history[1].raw);
-            const prevVal = history[1].val;
-            const newSens = Math.abs((val - prevVal) / (lastRaw - prevRaw));
+            const newSens = Math.abs((val - history[1].val) / (lastRaw - parseFloat(history[1].raw)));
             if(newSens > 1 && newSens < 20) cal.sens = newSens;
         }
-        cal.bInt = lastRaw;
-        cal.bGlu = val;
+        cal.bInt = lastRaw; cal.bGlu = val;
+        cal.syncCount = (cal.syncCount || 0) + 1;
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        alert("Logic Synced.");
+        updateCalBar(); alert("Tathya Sync Complete.");
     }
 
-    function renderLog() {
-        document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><b>${h.val} mg/dL</b></div>`).join('');
-    }
-
+    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><b>${h.val} mg/dL</b></div>`).join(''); }
     function resetUI() { document.getElementById('scanBtn').disabled = false; }
     window.onload = init;
 </script>
