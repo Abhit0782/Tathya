@@ -6,31 +6,21 @@
     <style>
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
-        
-        /* Progress Ring UI */
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 20px 0; display: flex; align-items: center; justify-content: center; }
         .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
         .progress-ring__track { stroke: #222; }
-
-        /* Inner Display */
         .inner-display { position: absolute; width: 200px; height: 200px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
         #pulseGraph { position: absolute; width: 100%; height: 60px; bottom: 40px; pointer-events: none; }
-        
         .result-text { font-size: 60px; font-weight: 800; color: var(--accent); z-index: 2; margin: 0; }
         .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 2; }
         .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 2; margin-bottom: 5px; }
-
-        /* Controls */
         .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 20px; }
         .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
         .btn-small.active { background: #ffa000; color: #000; }
-
         .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 10px 20px rgba(0,230,118,0.2); }
         .btn-main:disabled { background: #222; color: #444; box-shadow: none; }
-
-        /* Cards */
         .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
         .log-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #222; font-size: 14px; }
         input { background: #000; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 80px; text-align: center; }
@@ -70,7 +60,7 @@
             <button onclick="syncCal()" style="background: var(--blue); border:none; color:white; padding:5px 15px; border-radius:5px; font-weight:bold;">SYNC</button>
         </div>
         <div style="display: flex; align-items: center; justify-content: space-between;">
-            <span style="font-size: 11px; color: #888;">Enter finger-prick value:</span>
+            <span style="font-size: 11px; color: #888;">Compare with your finger-prick:</span>
             <input type="number" id="meterVal" placeholder="100">
         </div>
     </div>
@@ -91,38 +81,58 @@
     const clock = document.getElementById('clockProgress');
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
-    
-    // Smart Calibration Data
     let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
 
     async function init() {
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
-        try { 
-            stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: devices[cameraIdx].deviceId }, facingMode: 'environment' } });
+        const constraints = { 
+            video: { 
+                deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
+                facingMode: 'environment' 
+            } 
+        };
+        try {
+            if(stream) stream.getTracks().forEach(track => track.stop());
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = stream;
-        } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
+        } catch(e) { 
+            stream = await navigator.mediaDevices.getUserMedia({ video: true }); 
+            v.srcObject = stream; 
+        }
         renderLog();
     }
 
     async function toggleFlash() {
+        if(!stream) return;
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        
+        if (!caps.torch) {
+            alert("This lens does not support flash. Please try ↺ LENS button.");
+            return;
+        }
+
+        torch = !torch;
         try {
-            const track = stream.getVideoTracks()[0];
-            torch = !torch;
             await track.applyConstraints({ advanced: [{ torch: torch }] });
             document.getElementById('flashBtn').classList.toggle('active', torch);
-        } catch(e) { console.log("Flash not supported"); }
+        } catch(e) {
+            console.error(e);
+            alert("Could not trigger flash. Ensure no other app is using the camera.");
+        }
     }
 
     function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; init(); }
 
     function runAnalysis() {
+        if(!torch) { alert("Please turn on FLASH manually before scanning."); return; }
         document.getElementById('scanBtn').disabled = true;
         document.getElementById('gluResult').innerText = "--";
         buffer = []; pulseArr = [];
         const start = Date.now();
-        const duration = 45000; // 45 second scan for precision
+        const duration = 45000; 
         const circumference = 2 * Math.PI * 130;
 
         const timer = setInterval(() => {
@@ -138,10 +148,10 @@
             const intensity = r / (pix.length/4);
 
             if(elapsed < 5000) {
-                document.getElementById('phaseLabel').innerText = "Warming Up...";
+                document.getElementById('phaseLabel').innerText = "CALIBRATING...";
                 document.getElementById('phaseLabel').style.color = "#ffa000";
             } else {
-                document.getElementById('phaseLabel').innerText = "Deep Scanning...";
+                document.getElementById('phaseLabel').innerText = "ANALYZING...";
                 document.getElementById('phaseLabel').style.color = "#00e676";
                 buffer.push(intensity);
             }
@@ -172,63 +182,40 @@
     }
 
     async function finishAnalysis() {
-        // Smart Data Filter: Remove noise from finger tremors
         const sorted = buffer.sort((a,b)=>a-b);
         const clean = sorted.slice(Math.floor(buffer.length*0.15), -Math.floor(buffer.length*0.15));
         const avg = clean.reduce((a,b)=>a+b,0) / clean.length;
-
-        // Predictive Math Logic
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
         
         document.getElementById('gluResult').innerText = result;
         document.getElementById('timer').innerText = "DONE";
-        document.getElementById('phaseLabel').innerText = "SYNCED";
 
-        const logEntry = { 
-            time: new Date().toLocaleTimeString(), 
-            val: result, 
-            raw: avg.toFixed(3) 
-        };
-
+        const logEntry = { time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3) };
         history.unshift(logEntry);
         if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         
-        // Push to Google Sheets (Silent Cloud Update)
-        if(GOOGLE_SCRIPT_URL !== "PASTE_YOUR_DEPLOYED_URL_HERE") {
-            try {
-                fetch(GOOGLE_SCRIPT_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    body: JSON.stringify(logEntry)
-                });
-            } catch(e) { console.log("Cloud Sync Failed"); }
+        if(GOOGLE_SCRIPT_URL !== "PASTE_YOUR_URL_HERE") {
+            fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(logEntry) });
         }
-
         renderLog();
         resetUI();
     }
 
     function syncCal() {
-        const actualVal = parseFloat(document.getElementById('meterVal').value);
-        if(!actualVal || history.length < 1) return alert("Run a scan first.");
-        
-        // AUTO-LEARNING MATH: Adjusts sensitivity based on actual meter readings
+        const val = parseFloat(document.getElementById('meterVal').value);
+        if(!val || history.length < 1) return alert("Please scan first.");
         const lastRaw = parseFloat(history[0].raw);
         if(history.length > 1) {
-            // Recalculate sensitivity based on trend
             const prevRaw = parseFloat(history[1].raw);
             const prevVal = history[1].val;
-            const newSens = Math.abs((actualVal - prevVal) / (lastRaw - prevRaw));
-            if(newSens > 1 && newSens < 20) cal.sens = newSens; 
+            const newSens = Math.abs((val - prevVal) / (lastRaw - prevRaw));
+            if(newSens > 1 && newSens < 20) cal.sens = newSens;
         }
-
         cal.bInt = lastRaw;
-        cal.bGlu = actualVal;
-        
+        cal.bGlu = val;
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        alert("Tathya Logic Updated Successfully.");
-        renderLog();
+        alert("Logic Synced.");
     }
 
     function renderLog() {
@@ -240,4 +227,3 @@
 </script>
 </body>
 </html>
-
