@@ -84,7 +84,7 @@
 
 <script>
     // --- 1. CONFIGURATION: PASTE YOUR GOOGLE URL BELOW ---
-    const GOOGLE_SCRIPT_URL = "PASTE_YOUR_DEPLOYED_URL_HERE"; 
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
 
     const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
     const pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
@@ -99,7 +99,7 @@
     async function init() {
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
-        try {
+        try { 
             stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: devices[cameraIdx].deviceId }, facingMode: 'environment' } });
             v.srcObject = stream;
         } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
@@ -240,3 +240,4 @@
 </script>
 </body>
 </html>
+
