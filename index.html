@@ -218,6 +218,8 @@
         try {
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
+                headers: { "Content-Type": "text/plain" },
+                redirect: "follow",
                 body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
             });
             const cloudData = await resp.json();
