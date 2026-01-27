@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         
         /* Identity Enrollment UI */
         #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
@@ -13,20 +13,23 @@
         .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; font-size: 16px; text-align: center; }
         
         .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
-        #v_enroll { width: 100%; height: 100%; object-fit: cover; opacity: 0.6; }
+        #v_enroll { width: 100%; height: 100%; object-fit: cover; }
         
         /* Controls & Rings */
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
         .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
         .progress-ring__track { stroke: #222; }
-        .inner-display { position: absolute; width: 200px; height: 200px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
-        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
-        #pulseGraph { position: absolute; width: 100%; height: 50px; bottom: 35px; pointer-events: none; }
         
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 2; }
-        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 2; }
-        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 2; margin-bottom: 5px; }
+        .inner-display { position: absolute; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
+        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
+        
+        /* Fixed Pulse Graph in Center */
+        #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 20px; z-index: 5; pointer-events: none; }
+        
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 10; position: relative; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
+        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 10; margin-top: -5px; }
+        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 10; margin-bottom: 5px; }
 
         .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
         .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
@@ -38,8 +41,8 @@
         .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
         #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
         
-        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; }
-        #trendCanvas { width: 100%; height: 80px; }
+        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; box-sizing: border-box; }
+        #trendCanvas { width: 100%; height: 100px; }
         
         .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
         .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
@@ -49,26 +52,21 @@
 
     <div id="enrollModal">
         <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
-        
         <div id="nameSection">
-            <p style="font-size:14px; color:#aaa;">Enter name to sync Global Progress</p>
+            <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
             <input type="text" id="userName" class="modal-input" placeholder="User Name">
             <button onclick="proceedToFingers()" class="btn-main">CONTINUE</button>
         </div>
-
         <div id="fingerSection" style="display:none;">
             <div class="enroll-box">
                 <video id="v_enroll" autoplay playsinline muted></video>
                 <div id="enrollCounter" style="position:absolute; font-size:40px; font-weight:900; color:var(--accent);"></div>
             </div>
             <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; letter-spacing:1px; margin-bottom:5px;">LEFT THUMB</div>
-            
             <div class="controls" style="margin-bottom:10px;">
                 <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
                 <button class="btn-small" id="enrollFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
             </div>
-            
-            <p id="enrollStatus" style="font-size:12px; color:#888; margin-bottom:15px;">Choose lens where flash is visible</p>
             <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
         </div>
     </div>
@@ -98,18 +96,20 @@
     <div class="cal-bar-container"><div id="calBar"></div></div>
     <div style="font-size:10px; color:#666; margin-top:5px;">DATABASE SYNC PROGRESS</div>
 
-    <div class="trend-card"><canvas id="trendCanvas"></canvas></div>
+    <div class="trend-card">
+        <span style="font-size: 11px; color: var(--blue); font-weight: bold;">GLUCOSE TREND</span>
+        <canvas id="trendCanvas"></canvas>
+    </div>
 
     <div class="card">
         <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
-        <input type="number" id="meterVal" placeholder="Enter Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
+        <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
     </div>
 
     <div id="historyLog" class="card"></div>
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    // --- USER CONFIGURATION ---
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
 
     const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
@@ -125,28 +125,30 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
-        const d = await navigator.mediaDevices.enumerateDevices();
-        devices = d.filter(i => i.kind === 'videoinput');
-        await setupCamera();
-        
-        if(!enrollmentData) {
-            document.getElementById('enrollModal').classList.add('visible');
-        } else {
-            reviveFromCloud(enrollmentData.name);
-        }
-        updateCalBar(); drawTrend(); renderLog();
+        try {
+            const d = await navigator.mediaDevices.enumerateDevices();
+            devices = d.filter(i => i.kind === 'videoinput');
+            await setupCamera();
+            if(!enrollmentData) {
+                document.getElementById('enrollModal').classList.add('visible');
+            } else {
+                reviveFromCloud(enrollmentData.name);
+            }
+            updateCalBar(); drawTrend(); renderLog();
+        } catch(e) { alert("Camera Permission Required"); }
     }
 
     async function setupCamera() {
-        if(stream) stream.getTracks().forEach(t => t.stop());
+        if(stream) { stream.getTracks().forEach(t => t.stop()); }
         const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream; ve.srcObject = stream;
+        v.srcObject = stream;
+        ve.srcObject = stream;
     }
 
     function proceedToFingers() {
         const name = document.getElementById('userName').value;
-        if(!name) return alert("Please enter your name.");
+        if(!name) return alert("Name required.");
         document.getElementById('nameSection').style.display = "none";
         document.getElementById('fingerSection').style.display = "block";
     }
@@ -154,12 +156,12 @@
     async function toggleFlash() {
         if(!stream) return;
         const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
-        if(!caps.torch) return alert("Flash not supported on this lens. Try ↺ LENS.");
-        torch = !torch;
-        await track.applyConstraints({ advanced: [{ torch: torch }] });
-        document.getElementById('mainFlashBtn').classList.toggle('active', torch);
-        document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
+        try {
+            torch = !torch;
+            await track.applyConstraints({ advanced: [{ torch: torch }] });
+            document.getElementById('mainFlashBtn').classList.toggle('active', torch);
+            document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
+        } catch(e) { alert("Flash not supported on this lens."); torch = false; }
     }
 
     function toggleLens() {
@@ -167,8 +169,8 @@
         setupCamera();
     }
 
-    async function startEnrollStep() {
-        if(!torch) return alert("Turn on FLASH to scan.");
+    function startEnrollStep() {
+        if(!torch) return alert("Turn on FLASH.");
         document.getElementById('enrollBtn').disabled = true;
         let start = Date.now(), stepBuffer = [];
         const timer = setInterval(() => {
@@ -193,17 +195,11 @@
 
     function finishEnrollment() {
         const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        enrollmentData = { 
-            name: document.getElementById('userName').value, 
-            density: density, 
-            baseline: enrollTempData[0].intensity.toFixed(2), 
-            type: "ENROLLMENT" 
-        };
+        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), type: "ENROLLMENT" };
         localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
         pushToCloud(enrollmentData);
         document.getElementById('enrollModal').classList.remove('visible');
         if(torch) toggleFlash();
-        alert("Enrollment Complete, " + enrollmentData.name);
     }
 
     async function reviveFromCloud(name) {
@@ -227,23 +223,29 @@
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
+            
             ctx.drawImage(v, 0, 0, 50, 50);
-            const pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
+            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
             for(let i=0; i<pix.length; i+=4) r += pix[i];
-            const intensity = r / (pix.length/4);
+            let intensity = r / (pix.length/4);
+            
             if(elapsed > 5000) buffer.push(intensity);
-            pulseArr.push(intensity); if(pulseArr.length > 60) pulseArr.shift();
+            pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
             drawWave();
-            if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
+            
+            if (elapsed >= duration) {
+                clearInterval(timer);
+                finishAnalysis();
+            }
         }, 100);
     }
 
     function drawWave() {
         pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 2;
+        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
         const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
         pulseArr.forEach((p, i) => {
-            const x = (i / 60) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
+            const x = (i / 50) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
             if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
         });
         pCtx.stroke();
@@ -253,14 +255,13 @@
         const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
         document.getElementById('gluResult').innerText = result;
-        const logEntry = { 
-            name: enrollmentData.name, time: new Date().toLocaleTimeString(), 
-            val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" 
-        };
+        document.getElementById('timer').innerText = "DONE";
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
-        renderLog(); drawTrend(); document.getElementById('scanBtn').disabled = false;
+        renderLog(); drawTrend(); 
+        document.getElementById('scanBtn').disabled = false;
     }
 
     function syncCal() {
@@ -272,7 +273,7 @@
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, type: "SYNC" });
-        updateCalBar(); renderLog(); alert("Global Sync Successful.");
+        updateCalBar(); renderLog(); alert("Global Sync Complete.");
     }
 
     function pushToCloud(data) {
@@ -288,7 +289,7 @@
 
     function drawTrend() {
         if(history.length < 2) return;
-        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 80;
+        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
         const data = [...history].reverse(), vals = data.map(h => h.val);
         const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
         tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
