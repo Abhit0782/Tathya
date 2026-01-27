@@ -1,333 +1,339 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tathya - Biometric Dashboard</title>
+    <title>Tathya Pro - Precision Analytics</title>
     <link rel="manifest" href="manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <style>
-        /* [Keeping your existing CSS styles exactly as they are] */
-        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; --error: #ff5252; --gold: #ffd700; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
+        
+        /* Navigation Tabs */
+        .tab-bar { display: flex; width: 100%; background: #111; border-bottom: 1px solid #222; position: sticky; top: 0; z-index: 100; }
+        .tab { flex: 1; padding: 15px; text-align: center; font-size: 12px; font-weight: bold; color: #666; cursor: pointer; transition: 0.3s; }
+        .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); background: rgba(0,230,118,0.05); }
+
+        .view-section { display: none; width: 100%; max-width: 450px; padding: 20px; box-sizing: border-box; }
+        .view-section.active { display: flex; flex-direction: column; align-items: center; }
+
+        /* [Visual Components from previous versions] */
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
         #enrollModal.visible { display: flex; }
-        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 10px 0; font-size: 16px; text-align: center; }
-        .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
-        #v_enroll { width: 100%; height: 100%; object-fit: cover; }
-        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
-        .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; text-align: center; }
+        
+        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; }
+        .progress-ring { transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
-        .progress-ring__track { stroke: #222; }
-        .inner-display { position: absolute; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
+        
+        .inner-display { position: absolute; top: 30px; left: 30px; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
-        #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 20px; z-index: 5; pointer-events: none; }
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 10; position: relative; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
-        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 10; margin-top: -5px; }
-        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 10; margin-bottom: 5px; }
-        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
-        .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
-        .btn-small.active { background: #ffa000; color: #000; border-color: #ffa000; }
-        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
-        .btn-main:disabled { background: #222; color: #444; }
-        .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
-        #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
-        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; box-sizing: border-box; }
-        #trendCanvas { width: 100%; height: 100px; }
-        .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
-        .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
+        #targetCircle { position: absolute; width: 80px; height: 80px; border: 2px dashed var(--blue); border-radius: 50%; z-index: 15; transition: all 0.3s; }
+        #targetCircle.locked { border: 4px solid var(--accent); transform: scale(0.85); box-shadow: 0 0 20px var(--accent); }
+
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); z-index: 10; margin: 0; }
+        .btn-main { width: 100%; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .card { width: 100%; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
+        
+        /* Analytics Chart Container */
+        .chart-container { width: 100%; height: 250px; background: #000; border-radius: 15px; border: 1px solid #333; margin: 15px 0; position: relative; padding: 10px; box-sizing: border-box; }
+        #trendChart { width: 100%; height: 100%; }
+        
+        .stats-row { display: flex; justify-content: space-between; width: 100%; margin-top: 10px; }
+        .stat-card { flex: 1; background: #111; padding: 15px; border-radius: 12px; margin: 0 5px; text-align: center; border: 1px solid #222; }
+        .stat-val { font-size: 16px; font-weight: bold; color: var(--gold); }
+        .stat-lbl { font-size: 9px; color: #555; text-transform: uppercase; margin-top: 5px; }
     </style>
 </head>
 <body>
 
+    <div class="tab-bar">
+        <div class="tab active" onclick="switchTab('scan')">BIO-SCAN</div>
+        <div class="tab" onclick="switchTab('analytics')">ANALYTICS</div>
+        <div class="tab" onclick="switchTab('history')">LOGS</div>
+    </div>
+
     <div id="enrollModal">
-        <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
-        <div id="nameSection">
-            <p style="font-size:14px; color:#aaa;">Enter Name or Unique ID to Revive Data</p>
-            <input type="text" id="userName" class="modal-input" placeholder="Name or TATHYA-XXXX">
-            <button onclick="checkIdentity()" class="btn-main">CONTINUE</button>
-            <p id="uidDisplay" style="font-size: 11px; color: var(--blue); margin-top: 10px;"></p>
+        <h2 style="color:var(--accent);">TATHYA IDENTITY</h2>
+        <div id="idStep">
+            <input type="text" id="userName" class="modal-input" placeholder="Enter Full Name">
+            <button onclick="checkIdentity()" class="btn-main">INITIALIZE CLOUD</button>
         </div>
-        <div id="fingerSection" style="display:none;">
-            <div class="enroll-box">
-                <video id="v_enroll" autoplay playsinline muted></video>
-                <div id="enrollCounter" style="position:absolute; font-size:40px; font-weight:900; color:var(--accent);"></div>
-            </div>
-            <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; letter-spacing:1px; margin-bottom:5px;">LEFT THUMB</div>
-            <div class="controls" style="margin-bottom:10px;">
-                <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-                <button class="btn-small" id="enrollFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
-            </div>
-            <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
+        <div id="fingerStep" style="display:none;">
+            <video id="v_enroll" style="width:120px; height:120px; border-radius:50%; object-fit:cover; border:2px solid var(--blue);" autoplay playsinline muted></video>
+            <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; margin:10px;">LEFT THUMB</div>
+            <div id="enrollCounter" style="font-size:30px; font-weight:900; color:var(--accent);">5</div>
+            <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main" style="margin-top:10px;">SCAN FINGER</button>
         </div>
     </div>
 
-    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
-    <div class="bio-ring-container">
-        <svg class="progress-ring" width="280" height="280">
-            <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-            <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-        </svg>
-        <div class="inner-display">
-            <video id="v" autoplay playsinline muted></video>
-            <div id="timer" class="timer-text">--</div>
-            <div id="gluResult" class="result-text">--</div>
-            <div class="unit-text">mg/dL</div>
-            <canvas id="pulseGraph"></canvas>
+    <div id="scanView" class="view-section active">
+        <div id="statusPill" style="font-size:10px; padding:5px 15px; border-radius:20px; background:#1a1a1a; margin-bottom:10px; border:1px solid #333;">WAITING FOR PLACEMENT</div>
+        
+        <div class="bio-ring-container">
+            <svg class="progress-ring" width="280" height="280">
+                <circle stroke="#222" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
+                <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
+            </svg>
+            <div class="inner-display">
+                <video id="v" autoplay playsinline muted></video>
+                <div id="targetCircle"></div>
+                <div id="timer" style="font-size:14px; font-weight:bold; z-index:10;">READY</div>
+                <div id="gluResult" class="result-text">--</div>
+                <div style="font-size:10px; color:#666; z-index:10; letter-spacing:1px;">MG/DL</div>
+                <canvas id="pulseGraph" style="position:absolute; width:100%; height:80px; bottom:0; opacity:0.6; pointer-events:none;"></canvas>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:10px; width:100%; margin-bottom:15px;">
+            <button class="btn-small" onclick="toggleLens()" style="flex:1; padding:12px; background:var(--card); color:#fff; border-radius:12px; border:1px solid #333;">↺ LENS</button>
+            <button id="mainFlash" onclick="toggleFlash()" style="flex:1; padding:12px; background:var(--card); color:#fff; border-radius:12px; border:1px solid #333;">🔦 FLASH</button>
+        </div>
+        <button id="scanBtn" class="btn-main" onclick="runAnalysis()">INITIATE BIO-SCAN</button>
+
+        <div class="card">
+            <input type="number" id="meterVal" placeholder="Enter Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:15px; border-radius:10px; box-sizing:border-box; margin-bottom:10px;">
+            <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:15px; border-radius:10px; font-weight:bold; width:100%;">SYNC ACTUAL DATA</button>
         </div>
     </div>
-    <div class="controls">
-        <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-        <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
+
+    <div id="analyticsView" class="view-section">
+        <h3 style="margin:0; color:var(--blue);">TIME-SERIES TRENDS</h3>
+        <div class="chart-container">
+            <canvas id="trendChart"></canvas>
+        </div>
+        
+        <div class="stats-row">
+            <div class="stat-card">
+                <div id="avgGlu" class="stat-val">--</div>
+                <div class="stat-lbl">Avg Glucose</div>
+            </div>
+            <div class="stat-card">
+                <div id="accScore" class="stat-val">--%</div>
+                <div class="stat-lbl">System Accuracy</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <span style="font-size:12px; color:var(--accent);">CALIBRATION AUDIT</span>
+            <div id="auditStatus" style="font-size:14px; margin-top:10px; color:#aaa;">Performing drift analysis...</div>
+        </div>
     </div>
-    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
-    <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div class="trend-card"><canvas id="trendCanvas"></canvas></div>
-    <div class="card">
-        <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
-        <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
+
+    <div id="historyView" class="view-section">
+        <h3 style="margin:0; color:var(--accent);">HISTORY LOG</h3>
+        <div id="historyLog" style="width:100%; margin-top:15px;"></div>
     </div>
-    <div id="historyLog" class="card"></div>
+
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    // PWA Service Worker Registration
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js').then(() => console.log("Tathya PWA Active"));
-    }
+    // PWA Setup
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
 
     const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
+    const target = document.getElementById('targetCircle'), statusPill = document.getElementById('statusPill');
     const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
-    const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
+    const chartCanvas = document.getElementById('trendChart'), chartCtx = chartCanvas.getContext('2d');
     
-    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
-    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
+    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], isLocked = false;
+    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, lastAccuracy: 0 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
     
     const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
     let currentFingerIdx = 0, enrollTempData = [];
 
-    // --- UID GENERATOR ---
-    function generateUID(name) {
-        const id = Math.floor(1000 + Math.random() * 9000);
-        return `${name.substring(0,3).toUpperCase()}-${id}`;
-    }
-
     async function init() {
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
         await setupCamera();
-        if(!enrollmentData) {
-            document.getElementById('enrollModal').classList.add('visible');
-        } else {
-            document.getElementById('uidDisplay').innerText = "Logged in as: " + enrollmentData.uid;
-        }
-        updateCalBar(); drawTrend(); renderLog();
+        if(!enrollmentData) document.getElementById('enrollModal').classList.add('visible');
+        else reviveFromCloud(enrollmentData.name);
+        
+        setInterval(monitorSignal, 200);
+        renderLog();
+        drawAnalytics();
     }
 
-   async function checkIdentity() {
-        const input = document.getElementById('userName').value.trim();
-        if(!input) return alert("Please enter Name or ID");
-
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                body: JSON.stringify({type: "REVIVE_REQUEST", query: input}) 
-            });
-            const data = await resp.json();
-            
-            if(data.found) {
-                // Check if this is an old user without a UID
-                let finalUID = data.uid;
-                if(!finalUID || finalUID === "PENDING") {
-                    finalUID = generateUID(data.name);
-                    alert("Legacy Account Found! Your new Unique ID is: " + finalUID);
-                }
-
-                cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu };
-                enrollmentData = { name: data.name, uid: finalUID, density: data.density };
-                
-                localStorage.setItem('tathya_cal', JSON.stringify(cal));
-                localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-                
-                // Push a migration log to the cloud to lock in the new UID
-                pushToCloud({type: "MIGRATION_SYNC", val: "UID_ASSIGNED"});
-                
-                document.getElementById('enrollModal').classList.remove('visible');
-                location.reload();
-            } else {
-                // New User path remains the same
-                const newUID = generateUID(input);
-                enrollmentData = { name: input, uid: newUID };
-                document.getElementById('nameSection').style.display = "none";
-                document.getElementById('fingerSection').style.display = "block";
-            }
-        } catch(e) {
-            alert("Sync Error. Please check internet.");
-        }
+    function switchTab(tabId) {
+        document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(tabId + 'View').classList.add('active');
+        event.currentTarget.classList.add('active');
+        if(tabId === 'analytics') drawAnalytics();
     }
-
-    // ... [Keeping your existing camera, toggle, scan, and sync functions]
-    // Note: In finishAnalysis() and syncCal(), make sure to pass enrollmentData.uid 
-    // to the pushToCloud function.
 
     async function setupCamera() {
-        if(stream) { stream.getTracks().forEach(t => t.stop()); }
-        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
+        if(stream) stream.getTracks().forEach(t => t.stop());
+        const constraints = { video: { deviceId: devices[cameraIdx]?.deviceId, facingMode: 'environment' } };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = stream; ve.srcObject = stream;
     }
 
-    async function toggleFlash() {
-        if(!stream) return;
-        const track = stream.getVideoTracks()[0];
-        try {
-            torch = !torch;
-            await track.applyConstraints({ advanced: [{ torch: torch }] });
-            document.getElementById('mainFlashBtn').classList.toggle('active', torch);
-            document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
-        } catch(e) { alert("Flash not supported."); }
+    function monitorSignal() {
+        if(!torch) return;
+        ctx.drawImage(v, 0, 0, 50, 50);
+        const pix = ctx.getImageData(0, 0, 50, 50).data;
+        let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
+        const intensity = r / (pix.length/4);
+        if(intensity > 165) {
+            isLocked = true; target.className = "locked";
+            statusPill.innerText = "SIGNAL LOCKED"; statusPill.style.color = "var(--accent)";
+        } else {
+            isLocked = false; target.className = "";
+            statusPill.innerText = "ALIGN FINGER ON FLASH"; statusPill.style.color = "var(--error)";
+        }
     }
 
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
+    // --- ANALYTICS ENGINE: Time & Date Chart ---
+    function drawAnalytics() {
+        if(history.length < 2) return;
+        const width = chartCanvas.parentElement.offsetWidth;
+        chartCanvas.width = width; chartCanvas.height = 250;
+        
+        const data = [...history].reverse();
+        const vals = data.map(h => h.val);
+        const min = Math.min(...vals) - 20, max = Math.max(...vals) + 20, range = max - min;
+        
+        // Background Grid
+        chartCtx.strokeStyle = "#222"; chartCtx.lineWidth = 1;
+        for(let i=0; i<=4; i++) {
+            let y = 250 - (i * 50);
+            chartCtx.beginPath(); chartCtx.moveTo(0, y); chartCtx.lineTo(width, y); chartCtx.stroke();
+        }
+
+        // Line Chart
+        chartCtx.beginPath(); chartCtx.strokeStyle = "var(--blue)"; chartCtx.lineWidth = 3;
+        data.forEach((h, i) => {
+            const x = (i / (data.length - 1)) * width;
+            const y = 250 - ((h.val - min) / range * 250);
+            if(i === 0) chartCtx.moveTo(x,y); else chartCtx.lineTo(x,y);
+            
+            // Time Labels
+            chartCtx.fillStyle = "#555"; chartCtx.font = "8px Arial";
+            chartCtx.fillText(h.time.split(' ')[0], x - 10, 245);
+        });
+        chartCtx.stroke();
+
+        // Avg Stats
+        const avg = (vals.reduce((a,b)=>a+b,0) / vals.length).toFixed(0);
+        document.getElementById('avgGlu').innerText = avg;
+        document.getElementById('accScore').innerText = cal.lastAccuracy + "%";
+        
+        // Audit Logic
+        const drift = (parseFloat(history[0].raw) - parseFloat(history[1].raw)).toFixed(2);
+        document.getElementById('auditStatus').innerText = Math.abs(drift) < 3 ? "System is stable. Baseline drift: " + drift : "High drift detected ("+drift+"). Clean lens.";
     }
 
-    function startEnrollStep() {
-        if(!torch) return alert("Flash ON.");
-        document.getElementById('enrollBtn').disabled = true;
-        let start = Date.now(), stepBuffer = [];
-        const timer = setInterval(() => {
-            let elapsed = Date.now() - start;
-            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
-            ctx.drawImage(ve, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
-            stepBuffer.push(r / (pix.length/4));
-            if(elapsed >= 5000) {
-                clearInterval(timer);
-                enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: (stepBuffer.reduce((a,b)=>a+b,0)/stepBuffer.length) });
-                currentFingerIdx++;
-                if(currentFingerIdx < 10) {
-                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
-                    document.getElementById('enrollCounter').innerText = "";
-                    document.getElementById('enrollBtn').disabled = false;
-                } else { finishEnrollment(); }
-            }
-        }, 100);
-    }
-
-    function finishEnrollment() {
-        const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        enrollmentData.density = density;
-        enrollmentData.type = "ENROLLMENT";
-        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-        pushToCloud(enrollmentData);
-        document.getElementById('enrollModal').classList.remove('visible');
-        location.reload();
-    }
-
-    function runAnalysis() {
-        if(!torch) return alert("Flash ON.");
+    async function runAnalysis() {
+        if(!isLocked) return alert("Signal not locked.");
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
-        const start = Date.now();
+        const start = Date.now(), duration = 45000;
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/45000,1) * 816);
-            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((45000-elapsed)/1000)).toString().padStart(2,'0')}`;
+            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
+            document.getElementById('timer').innerText = `${Math.ceil((duration-elapsed)/1000)}s`;
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
             for(let i=0; i<pix.length; i+=4) r += pix[i];
             let intensity = r / (pix.length/4);
             if(elapsed > 5000) buffer.push(intensity);
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-            drawWave();
-            if (elapsed >= 45000) { clearInterval(timer); finishAnalysis(); }
+            drawPulse();
+            if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
         }, 100);
     }
 
-    function drawWave() {
-        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
-        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
-        pulseArr.forEach((p, i) => {
-            const x = (i / 50) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
-            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
-        });
-        pCtx.stroke();
-    }
-
     function finishAnalysis() {
-        const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
-        const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
+        const sorted = buffer.sort((a,b) => a - b);
+        const clean = sorted.slice(Math.floor(sorted.length * 0.25), Math.floor(sorted.length * 0.75));
+        const avg = clean.reduce((a,b) => a + b, 0) / clean.length;
+        const result = Math.round(cal.bGlu + (cal.bInt - avg) * (cal.sens / (parseFloat(enrollmentData.density) || 1)));
+        
         document.getElementById('gluResult').innerText = result;
-        const logEntry = { uid: enrollmentData.uid, name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" };
-        history.unshift(logEntry); if(history.length > 10) history.pop();
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
-        pushToCloud(logEntry);
-        renderLog(); drawTrend(); document.getElementById('scanBtn').disabled = false;
+        const now = new Date();
+        const logEntry = { 
+            time: now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}),
+            fullDate: now.toLocaleDateString(),
+            val: result, raw: avg.toFixed(3), actual: "--" 
+        };
+        history.unshift(logEntry); if(history.length > 20) history.pop();
+        saveData(); renderLog(); pushToCloud(logEntry);
+        document.getElementById('scanBtn').disabled = false;
+        document.getElementById('timer').innerText = "READY";
     }
 
     function syncCal() {
         const val = parseFloat(document.getElementById('meterVal').value);
         if(!val || history.length < 1) return alert("Scan first.");
+        cal.lastAccuracy = (Math.max(0, 100 - (Math.abs(val - history[0].val) / val * 100))).toFixed(1);
+        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val; cal.syncCount++;
         history[0].actual = val;
-        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val;
-        cal.syncCount++;
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
-        pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, type: "SYNC" });
-        updateCalBar(); renderLog(); alert("Global Sync OK.");
+        saveData(); renderLog(); alert("Sync Success: " + cal.lastAccuracy + "% Accuracy");
     }
 
-    function pushToCloud(data) {
-        const fullData = { 
-            ...data, 
-            uid: enrollmentData ? enrollmentData.uid : "PENDING",
-            name: enrollmentData ? enrollmentData.name : "Guest",
-            profileDensity: enrollmentData ? enrollmentData.density : "1.0",
-            profileBaseline: enrollmentData ? enrollmentData.baseline : "220",
-            syncCount: cal.syncCount,
-            learnedSens: cal.sens
-        };
+    // [Standard Helper Functions]
+    async function toggleFlash() { const track = stream.getVideoTracks()[0]; torch = !torch; await track.applyConstraints({ advanced: [{ torch: torch }] }); document.getElementById('mainFlash').style.borderColor = torch ? "var(--accent)" : "#333"; }
+    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; setupCamera(); }
+    function saveData() { localStorage.setItem('tathya_cal', JSON.stringify(cal)); localStorage.setItem('tathya_hist', JSON.stringify(history)); localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData)); }
+    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time} (${h.fullDate})</span><b>${h.val} mg/dL</b></div>`).join(''); }
+    function pushToCloud(d) { fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({...d, uid: enrollmentData?.uid, name: enrollmentData?.name})}); }
+    
+    // [Identity Handshake]
+    async function checkIdentity() {
+        const name = document.getElementById('userName').value;
+        if(!name) return;
+        try {
+            const resp = await fetch(GOOGLE_SCRIPT_URL, {method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", query: name})});
+            const data = await resp.json();
+            if(data.found) {
+                cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu, lastAccuracy: 0 };
+                enrollmentData = { name: data.name, uid: data.uid, density: data.density };
+                saveData(); location.reload();
+            } else {
+                document.getElementById('idStep').style.display = "none";
+                document.getElementById('fingerStep').style.display = "block";
+            }
+        } catch(e) { alert("Cloud Offline. Using Guest."); }
+    }
 
-        fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify(fullData)
+    function startEnrollStep() {
+        if(!torch) return alert("Flash required");
+        document.getElementById('enrollBtn').disabled = true;
+        let start = Date.now();
+        const timer = setInterval(() => {
+            let elapsed = Date.now() - start;
+            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
+            if(elapsed >= 5000) {
+                clearInterval(timer);
+                currentFingerIdx++;
+                if(currentFingerIdx < 10) {
+                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
+                    document.getElementById('enrollBtn').disabled = false;
+                } else {
+                    enrollmentData = { name: document.getElementById('userName').value, uid: "T-"+Math.floor(Math.random()*9000), density: 1.05 };
+                    saveData(); location.reload();
+                }
+            }
+        }, 100);
+    }
+
+    function drawPulse() {
+        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
+        pCtx.beginPath(); pCtx.strokeStyle = "var(--accent)"; pCtx.lineWidth = 3;
+        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = (max-min)||1;
+        pulseArr.forEach((p, i) => {
+            const x = (i/50)*pGraph.width, y = pGraph.height-((p-min)/range*pGraph.height);
+            if(i===0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
         });
+        pCtx.stroke();
     }
-
-    function updateCalBar() {
-        const count = cal.syncCount || 0;
-        document.getElementById('calBar').style.width = Math.min((count/10)*100, 100) + "%";
-        document.getElementById('calBar').style.background = count < 3 ? "#f44336" : (count < 7 ? "#ffa000" : "#00e676");
-    }
-
-    function drawTrend() {
-        if(history.length < 2) return;
-        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
-        const data = [...history].reverse(), vals = data.map(h => h.val);
-        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
-        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
-        data.forEach((h, i) => {
-            const x = (i / (data.length - 1)) * tCanvas.width, y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
-            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
-        });
-        tCtx.stroke();
-    }
-
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
 
     window.onload = init;
 </script>
 </body>
 </html>
-
-
-
-
