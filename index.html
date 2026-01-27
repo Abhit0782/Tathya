@@ -1,228 +1,285 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tathya Pro - Cloud Fix</title>
+    <title>Tathya - Biometric Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; --error: #ff5252; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
+        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; }
-        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid #333; color: #fff; border-radius: 10px; margin-bottom: 15px; font-size: 16px; text-align: center; }
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+        #enrollModal.visible { display: flex; }
+        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; font-size: 16px; text-align: center; }
         
-        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; }
-        .inner-display { position: absolute; top: 30px; left: 30px; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #222; }
+        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
+        .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+        .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
+        .progress-ring__track { stroke: #222; }
+        .inner-display { position: absolute; width: 200px; height: 200px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
-        #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 10px; z-index: 5; pointer-events: none; }
-        
-        #targetCircle { position: absolute; width: 90px; height: 90px; border: 2px dashed #444; border-radius: 50%; z-index: 15; }
-        #targetCircle.locked { border: 4px solid var(--accent); transform: scale(0.8); box-shadow: 0 0 20px var(--accent); }
-
-        .btn-main { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
-        .btn-small { flex: 1; background: #111; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 10px; }
-        #calBar { width: 0%; height: 8px; background: var(--accent); transition: width 0.5s; border-radius: 4px; margin: 10px 0; border: 1px solid #333; }
-        
-        #forceStart { display: none; color: var(--blue); margin-top: 20px; font-size: 12px; text-decoration: underline; cursor: pointer; }
+        #v_enroll { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); margin: 10px; }
+        #pulseGraph { position: absolute; width: 100%; height: 50px; bottom: 35px; pointer-events: none; }
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 2; }
+        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 2; }
+        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 2; margin-bottom: 5px; }
+        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
+        .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
+        .btn-small.active { background: #ffa000; color: #000; }
+        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
+        .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
+        #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
+        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; }
+        #trendCanvas { width: 100%; height: 100px; }
+        .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
+        .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
     </style>
 </head>
 <body>
 
     <div id="enrollModal">
-        <h2 style="color:var(--accent);">TATHYA HANDSHAKE</h2>
-        <p style="font-size:12px; color:#888; margin-bottom:20px;">Retrieving Biometric Identity...</p>
-        <input type="text" id="userName" class="modal-input" placeholder="Abhishek Thakur">
-        <div style="display:flex; gap:10px; width:100%; margin-bottom:15px;">
-            <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-            <button id="modalFlash" class="btn-small" onclick="toggleFlash()">🔦 FLASH</button>
+        <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
+        <div id="nameInputSection">
+            <p style="font-size:14px; color:#aaa;">Enter your name to sync with Global Database</p>
+            <input type="text" id="userName" class="modal-input" placeholder="Your Name">
+            <button onclick="startEnrollmentProcess()" class="btn-main">CONTINUE</button>
         </div>
-        <button id="handshakeBtn" onclick="performHandshake()" class="btn-main">RESTORE PROGRESS</button>
-        <div id="forceStart" onclick="bypassCloud()">Cloud taking too long? Force Start Local.</div>
+        <div id="fingerSection" style="display:none;">
+            <video id="v_enroll" autoplay playsinline muted></video>
+            <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; margin:10px;">LEFT THUMB</div>
+            <p id="enrollCounter" style="font-size:30px; color:var(--accent); font-weight:bold;">5</p>
+            <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
+        </div>
     </div>
 
-    <div id="scanView" style="width:100%; max-width:450px; padding:20px; display:flex; flex-direction:column; align-items:center;">
-        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--blue); margin-bottom:10px;">SIGNAL STANDBY</div>
-        
-        <div class="bio-ring-container">
-            <svg class="progress-ring" width="280" height="280">
-                <circle stroke="#222" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-                <circle id="clockProgress" style="stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816;" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-            </svg>
-            <div class="inner-display">
-                <video id="v" autoplay playsinline muted></video>
-                <div id="targetCircle"></div>
-                <div id="timer" style="font-size:14px; z-index:10; font-weight:bold;">READY</div>
-                <div id="gluResult" style="font-size:60px; font-weight:800; color:var(--accent); z-index:10; margin:0;">--</div>
-                <canvas id="pulseGraph"></canvas>
-            </div>
+    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
+    <div class="bio-ring-container">
+        <svg class="progress-ring" width="280" height="280">
+            <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
+            <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
+        </svg>
+        <div class="inner-display">
+            <video id="v" autoplay playsinline muted></video>
+            <div id="timer" class="timer-text">--</div>
+            <div id="gluResult" class="result-text">--</div>
+            <div class="unit-text">mg/dL</div>
+            <canvas id="pulseGraph"></canvas>
         </div>
-
-        <div style="width:100%; text-align:center;">
-            <div id="calBar"></div>
-            <div id="calText" style="font-size:9px; color:#555;">SYNC LEVEL: 0</div>
-        </div>
-
-        <div style="display:flex; gap:10px; width:100%; margin: 20px 0;">
-            <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-            <button id="mainFlash" class="btn-small" onclick="toggleFlash()">🔦 FLASH</button>
-        </div>
-
-        <button id="scanBtn" class="btn-main" onclick="runAnalysis()">START BIO-SCAN</button>
     </div>
+
+    <div class="controls">
+        <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
+        <button class="btn-small" id="flashBtn" onclick="toggleFlash()">🔦 FLASH</button>
+    </div>
+
+    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
+    <div class="cal-bar-container"><div id="calBar"></div></div>
+    <div id="calText" style="font-size: 10px; color: #666; margin-top: 5px;">DATABASE SYNC PROGRESS</div>
+    <div class="trend-card"><canvas id="trendCanvas"></canvas></div>
+    <div class="card">
+        <button onclick="syncCal()" style="background: var(--blue); border:none; color:white; padding:10px; border-radius:10px; font-weight:bold; width:100%;">SYNC WITH METER</button>
+        <input type="number" id="meterVal" placeholder="Enter Actual Glucose" style="width:100%; background:#000; border:1px solid #333; color:#fff; padding:10px; margin-top:10px; border-radius:8px;">
+    </div>
+    <div id="historyLog" class="card"></div>
+
+    <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec";
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
+
+    const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
+    const pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
+    const clock = document.getElementById('clockProgress');
+    const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
-    const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
-    const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
+    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
+    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
+    let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
+    let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
     
-    let stream, torch = false, pulseArr = [], devices = [], cameraIdx = 0, isLocked = false;
-    let enrollmentData = null, cal = { bInt: 218.75, bGlu: 100, sens: 5.5, syncCount: 1 };
+    const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
+    let currentFingerIdx = 0;
+    let enrollTempData = [];
 
     async function init() {
-        try {
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera();
-            
-            const stored = localStorage.getItem('tathya_enroll');
-            if(stored) {
-                enrollmentData = JSON.parse(stored);
-                cal = JSON.parse(localStorage.getItem('tathya_cal')) || cal;
-                document.getElementById('enrollModal').style.display = 'none';
-                updateUI();
-            }
-            
-            setInterval(monitorSignal, 150);
-        } catch(e) { console.log(e); }
-    }
-
-    async function performHandshake() {
-        const name = document.getElementById('userName').value.trim();
-        if(!name) return;
-        
-        document.getElementById('handshakeBtn').innerText = "QUERYING DATABASE...";
-        document.getElementById('forceStart').style.display = "block";
-
-        try {
-            const response = await fetch(GOOGLE_SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify({type: "REVIVE_REQUEST", query: name})
-            });
-            const data = await response.json();
-            
-            if(data.found) {
-                enrollmentData = { name: data.name, uid: data.uid, density: parseFloat(data.density) };
-                cal = { bInt: parseFloat(data.baseline), bGlu: parseFloat(data.bGlu), sens: parseFloat(data.sens), syncCount: parseInt(data.syncCount) };
-            } else {
-                enrollmentData = { name: name, uid: "T-"+Math.floor(1000+Math.random()*9000), density: 0.99 };
-            }
-            finalizeLogin();
-        } catch(e) {
-            console.log("Database handshake failed. Using local fail-safe.");
-        }
-    }
-
-    function bypassCloud() {
-        const name = document.getElementById('userName').value.trim() || "User";
-        enrollmentData = { name: name, uid: "LOCAL-RESTORE", density: 0.99 };
-        finalizeLogin();
-    }
-
-    function finalizeLogin() {
-        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        document.getElementById('enrollModal').style.display = 'none';
-        updateUI();
-    }
-
-    function monitorSignal() {
-        if(!torch || !stream) return;
-        ctx.drawImage(v, 0, 0, 50, 50);
-        const pix = ctx.getImageData(0, 0, 50, 50).data;
-        let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
-        let intensity = r / (pix.length/4);
-        
-        if(intensity > 130) {
-            isLocked = true; 
-            document.getElementById('targetCircle').className = "locked";
-            document.getElementById('statusMsg').innerText = "SIGNAL LOCKED";
-            document.getElementById('statusMsg').style.color = "#00e676";
+        const d = await navigator.mediaDevices.enumerateDevices();
+        devices = d.filter(i => i.kind === 'videoinput');
+        await setupCamera();
+        if(!enrollmentData) {
+            document.getElementById('enrollModal').classList.add('visible');
         } else {
-            isLocked = false; 
-            document.getElementById('targetCircle').className = "";
-            document.getElementById('statusMsg').innerText = "PLACE FINGER";
-            document.getElementById('statusMsg').style.color = "#ff5252";
+            reviveFromCloud(enrollmentData.name);
         }
+        updateCalBar(); drawTrend(); renderLog();
     }
 
     async function setupCamera() {
         if(stream) stream.getTracks().forEach(t => t.stop());
-        const constraints = { video: { deviceId: devices[cameraIdx]?.deviceId, facingMode: 'environment' } };
+        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream;
+        v.srcObject = stream; ve.srcObject = stream;
     }
 
-    function runAnalysis() {
-        if(!isLocked) return alert("Signal Lock Required");
-        let buffer = []; pulseArr = [];
-        document.getElementById('scanBtn').disabled = true;
-        const start = Date.now();
-        const timer = setInterval(() => {
-            const elapsed = Date.now() - start;
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/45000,1) * 816);
-            document.getElementById('timer').innerText = `${Math.ceil((45000-elapsed)/1000)}s`;
-            
-            ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
-            let inst = r / (pix.length/4);
-            
-            if(elapsed > 5000) buffer.push(inst);
-            pulseArr.push(inst); if(pulseArr.length > 50) pulseArr.shift();
-            drawPulse();
-            
-            if (elapsed >= 45000) {
-                clearInterval(timer);
-                const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
-                const result = Math.round(cal.bGlu + (cal.bInt - avg) * (cal.sens / enrollmentData.density));
-                document.getElementById('gluResult').innerText = result;
-                document.getElementById('scanBtn').disabled = false;
-                fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({uid: enrollmentData.uid, name: enrollmentData.name, val: result, raw: avg, type: "SCAN"})});
+    function startEnrollmentProcess() {
+        const name = document.getElementById('userName').value;
+        if(!name) return alert("Name required for identification.");
+        document.getElementById('nameInputSection').style.display = "none";
+        document.getElementById('fingerSection').style.display = "block";
+    }
+
+    async function startEnrollStep() {
+        if(!torch) await toggleFlash();
+        document.getElementById('enrollBtn').disabled = true;
+        let stepBuffer = [];
+        let start = Date.now();
+        const enrollTimer = setInterval(() => {
+            let elapsed = Date.now() - start;
+            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
+            ctx.drawImage(ve, 0, 0, 50, 50);
+            let pix = ctx.getImageData(0, 0, 50, 50).data;
+            let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
+            stepBuffer.push(r / (pix.length/4));
+            if(elapsed >= 5000) {
+                clearInterval(enrollTimer);
+                enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: (stepBuffer.reduce((a,b)=>a+b,0)/stepBuffer.length) });
+                currentFingerIdx++;
+                if(currentFingerIdx < 10) {
+                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
+                    document.getElementById('enrollBtn').disabled = false;
+                } else { finishEnrollment(); }
             }
         }, 100);
     }
 
-    function drawPulse() {
-        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
-        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = (max-min)||1;
-        pulseArr.forEach((p, i) => {
-            const x = (i/50)*pGraph.width, y = pGraph.height-((p-min)/range*pGraph.height);
-            if(i===0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
-        });
-        pCtx.stroke();
+    function finishEnrollment() {
+        const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
+        enrollmentData = { 
+            name: document.getElementById('userName').value, 
+            density: density, 
+            baseline: enrollTempData[0].intensity.toFixed(2), 
+            type: "ENROLLMENT" 
+        };
+        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+        pushToCloud(enrollmentData);
+        document.getElementById('enrollModal').classList.remove('visible');
+        if(torch) toggleFlash();
+        alert("Welcome, " + enrollmentData.name);
     }
 
-    function updateUI() {
-        document.getElementById('calBar').style.width = Math.min((cal.syncCount / 10) * 100, 100) + "%";
-        document.getElementById('calText').innerText = "SYNC LEVEL: " + cal.syncCount;
+    async function reviveFromCloud(name) {
+        try {
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", name: name}) });
+            const data = await resp.json();
+            if(data.syncCount > cal.syncCount) {
+                cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu };
+                localStorage.setItem('tathya_cal', JSON.stringify(cal));
+                updateCalBar();
+            }
+        } catch(e) {}
     }
 
     async function toggleFlash() {
         const track = stream.getVideoTracks()[0];
         torch = !torch;
         await track.applyConstraints({ advanced: [{ torch: torch }] });
-        document.getElementById('modalFlash').style.background = torch ? "#00e676" : "#111";
-        document.getElementById('mainFlash').style.background = torch ? "#00e676" : "#111";
+        document.getElementById('flashBtn').classList.toggle('active', torch);
     }
 
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
+    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; setupCamera(); }
+
+    function runAnalysis() {
+        if(!torch) { alert("Enable Flash."); return; }
+        document.getElementById('scanBtn').disabled = true;
+        buffer = []; pulseArr = [];
+        const start = Date.now(), duration = 45000;
+        const timer = setInterval(() => {
+            const elapsed = Date.now() - start;
+            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
+            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
+            ctx.drawImage(v, 0, 0, 50, 50);
+            const pix = ctx.getImageData(0, 0, 50, 50).data;
+            let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
+            const intensity = r / (pix.length/4);
+            if(elapsed > 5000) buffer.push(intensity);
+            pulseArr.push(intensity); if(pulseArr.length > 60) pulseArr.shift();
+            drawWave();
+            if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
+        }, 100);
     }
 
+    function drawWave() {
+        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
+        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 2;
+        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
+        pulseArr.forEach((p, i) => {
+            const x = (i / 60) * pGraph.width;
+            const y = pGraph.height - ((p - min) / range * pGraph.height);
+            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
+        });
+        pCtx.stroke();
+    }
+
+    function finishAnalysis() {
+        const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
+        const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
+        document.getElementById('gluResult').innerText = result;
+        const logEntry = { 
+            name: enrollmentData.name, 
+            time: new Date().toLocaleTimeString(), 
+            val: result, 
+            raw: avg.toFixed(3), 
+            actual: "--", 
+            type: "SCAN" 
+        };
+        history.unshift(logEntry); if(history.length > 10) history.pop();
+        localStorage.setItem('tathya_hist', JSON.stringify(history));
+        pushToCloud(logEntry);
+        renderLog(); drawTrend(); document.getElementById('scanBtn').disabled = false;
+    }
+
+    function syncCal() {
+        const val = parseFloat(document.getElementById('meterVal').value);
+        if(!val || history.length < 1) return alert("Scan first.");
+        history[0].actual = val;
+        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val;
+        cal.syncCount++;
+        localStorage.setItem('tathya_cal', JSON.stringify(cal));
+        localStorage.setItem('tathya_hist', JSON.stringify(history));
+        pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, type: "SYNC" });
+        updateCalBar(); renderLog(); alert("Global Sync Complete.");
+    }
+
+    function pushToCloud(data) {
+        const fullData = { 
+            ...data, 
+            profileDensity: enrollmentData?.density, 
+            profileBaseline: enrollmentData?.baseline 
+        };
+        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
+    }
+
+    function updateCalBar() {
+        const count = cal.syncCount || 0;
+        document.getElementById('calBar').style.width = Math.min((count/10)*100, 100) + "%";
+        document.getElementById('calBar').style.background = count < 3 ? "#f44336" : (count < 7 ? "#ffa000" : "#00e676");
+    }
+
+    function drawTrend() {
+        if(history.length < 2) return;
+        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
+        const data = [...history].reverse();
+        const vals = data.map(h => h.val);
+        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
+        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
+        data.forEach((h, i) => {
+            const x = (i / (data.length - 1)) * tCanvas.width;
+            const y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
+            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
+        });
+        tCtx.stroke();
+    }
+
+    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
     window.onload = init;
 </script>
-<canvas id="c" width="50" height="50" style="display:none;"></canvas>
 </body>
 </html>
