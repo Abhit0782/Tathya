@@ -1,13 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tathya Pro - Smart Lock</title>
+    <title>Tathya Pro - Precision Suite</title>
     <link rel="manifest" href="manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <style>
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; --error: #ff5252; --warn: #ffd700; }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         
+        /* Navigation */
         .tab-bar { display: flex; width: 100%; background: #111; border-bottom: 1px solid #222; position: sticky; top: 0; z-index: 100; }
         .tab { flex: 1; padding: 15px; text-align: center; font-size: 11px; font-weight: bold; color: #555; cursor: pointer; }
         .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
@@ -15,25 +17,23 @@
         .view-section { display: none; width: 100%; max-width: 450px; padding: 20px; box-sizing: border-box; }
         .view-section.active { display: flex; flex-direction: column; align-items: center; }
 
-        /* Enhanced Targeting Circle */
+        /* Enrollment Overlay */
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 30px; }
+        #enrollModal.visible { display: flex; }
+        .modal-input { width: 100%; padding: 12px; background: #111; border: 1px solid #333; color: #fff; border-radius: 8px; margin-bottom: 15px; }
+
+        /* Progress & Ring */
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; }
         .inner-display { position: absolute; top: 30px; left: 30px; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #222; }
-        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
+        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
+        #pulseGraph { position: absolute; width: 100%; height: 100px; bottom: 10px; z-index: 5; pointer-events: none; }
         
-        #targetCircle { position: absolute; width: 90px; height: 90px; border: 2px dashed #444; border-radius: 50%; z-index: 15; transition: all 0.2s; }
-        #targetCircle.too-light { border-color: var(--warn); transform: scale(1.1); }
-        #targetCircle.locked { border: 4px solid var(--accent); transform: scale(0.8); box-shadow: 0 0 20px var(--accent); }
+        .cal-progress-container { width: 100%; height: 6px; background: #222; border-radius: 3px; margin: 10px 0; overflow: hidden; }
+        #calBar { width: 0%; height: 100%; background: var(--accent); transition: width 0.5s; }
 
-        /* Signal Strength Meter */
-        .signal-meter { width: 100%; height: 4px; background: #222; border-radius: 2px; margin-top: 10px; position: relative; overflow: hidden; }
-        #signalFill { height: 100%; width: 0%; background: var(--error); transition: width 0.2s; }
-
-        .status-msg { font-size: 11px; font-weight: bold; margin-top: 5px; text-transform: uppercase; letter-spacing: 1px; }
-        .btn-main { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
-        .btn-main:disabled { background: #222; color: #555; }
-        
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
-        #enrollModal.visible { display: flex; }
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); z-index: 10; margin: 0; }
+        .btn-main { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
+        #trendChart { width: 100%; height: 200px; background: #000; border-radius: 12px; border: 1px solid #222; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -45,153 +45,144 @@
     </div>
 
     <div id="enrollModal">
-        <h2 style="color:var(--accent);">TATHYA IDENTITY</h2>
-        <input type="text" id="userName" style="width:80%; padding:15px; background:#111; border:1px solid var(--blue); color:#fff; border-radius:10px;" placeholder="Enter Name">
-        <button onclick="checkIdentity()" class="btn-main">CONTINUE</button>
+        <h2 style="color:var(--accent);">RECOVER ACCOUNT</h2>
+        <input type="text" id="userName" class="modal-input" placeholder="Enter Old Name or ID">
+        <button onclick="attemptRecovery()" class="btn-main">RESTORE MEMORY</button>
+        <p style="font-size:10px; color:#555; margin-top:10px;">If no account found, a new one will be created.</p>
     </div>
 
     <div id="scanView" class="view-section active">
-        <div id="statusMsg" class="status-msg" style="color: var(--error);">NO FINGER DETECTED</div>
+        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--warn);">INITIALIZING...</div>
         
         <div class="bio-ring-container">
             <svg class="progress-ring" width="280" height="280">
                 <circle stroke="#222" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-                <circle id="clockProgress" style="stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round;" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
+                <circle id="clockProgress" style="stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816;" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
             </svg>
             <div class="inner-display">
                 <video id="v" autoplay playsinline muted></video>
-                <div id="targetCircle"></div>
                 <div id="timer" style="font-size:14px; z-index:10; font-weight:bold;">READY</div>
-                <div id="gluResult" style="font-size:60px; font-weight:800; color:var(--accent); z-index:10;">--</div>
-                <canvas id="pulseGraph" style="position:absolute; width:100%; height:80px; bottom:0; opacity:0.6; pointer-events:none;"></canvas>
+                <div id="gluResult" class="result-text">--</div>
+                <canvas id="pulseGraph"></canvas>
             </div>
         </div>
 
-        <div class="signal-meter"><div id="signalFill"></div></div>
+        <div class="cal-progress-container"><div id="calBar"></div></div>
+        <div style="font-size:9px; color:#555; margin-bottom:15px;">CALIBRATION LEVEL</div>
 
-        <div style="display:flex; gap:10px; width:100%; margin: 15px 0;">
-            <button class="btn-small" onclick="toggleLens()" style="flex:1; padding:12px; background:#111; color:#fff; border-radius:10px; border:1px solid #333;">LENS</button>
-            <button id="mainFlash" onclick="toggleFlash()" style="flex:1; padding:12px; background:#111; color:#fff; border-radius:10px; border:1px solid #333;">FLASH</button>
-        </div>
-        
         <button id="scanBtn" class="btn-main" onclick="runAnalysis()">START SCAN</button>
         
-        <div style="width:100%; margin-top:15px; background:#111; padding:15px; border-radius:12px; border:1px solid #222;">
-            <input type="number" id="meterVal" placeholder="Meter Reading" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
-            <button onclick="syncCal()" style="width:100%; background:var(--blue); border:none; color:white; padding:12px; border-radius:8px; font-weight:bold;">SYNC ACTUAL</button>
+        <div class="card" style="width:100%; margin-top:15px; background:#111; padding:15px; border-radius:12px;">
+            <input type="number" id="meterVal" placeholder="Meter Value" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
+            <button onclick="syncCal()" style="width:100%; background:var(--blue); color:white; padding:12px; border-radius:8px; border:none; font-weight:bold;">SYNC CLOUD</button>
         </div>
     </div>
 
-    <div id="analyticsView" class="view-section">
-        <canvas id="trendChart" style="width:100%; height:250px; background:#000; border-radius:12px;"></canvas>
-    </div>
-    
-    <div id="historyView" class="view-section">
-        <div id="historyLog" style="width:100%;"></div>
-    </div>
+    <div id="analyticsView" class="view-section"><canvas id="trendChart"></canvas></div>
+    <div id="historyView" class="view-section"><div id="historyLog" style="width:100%;"></div></div>
 
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec";
+    const GOOGLE_SCRIPT_URL = "PASTE_YOUR_URL_HERE";
     
     const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
-    const target = document.getElementById('targetCircle'), statusMsg = document.getElementById('statusMsg'), signalFill = document.getElementById('signalFill');
     const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
+    const calBar = document.getElementById('calBar');
     
-    let stream, torch = false, buffer = [], pulseArr = [], isLocked = false, devices = [], cameraIdx = 0;
-    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
-    let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
-    let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
+    let stream, torch = false, buffer = [], pulseArr = [], devices = [], cameraIdx = 0;
+    
+    // --- NANO-BANANA MEMORY RECOVERY ---
+    let cal = { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
+    let history = [];
+    let enrollmentData = null;
+
+    async function loadStoredData() {
+        const storedCal = localStorage.getItem('tathya_cal');
+        const storedHist = localStorage.getItem('tathya_hist');
+        const storedEnroll = localStorage.getItem('tathya_enroll');
+
+        if(storedCal) cal = JSON.parse(storedCal);
+        if(storedHist) history = JSON.parse(storedHist);
+        if(storedEnroll) enrollmentData = JSON.parse(storedEnroll);
+
+        updateUI();
+    }
 
     async function init() {
+        await loadStoredData();
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
         await setupCamera();
-        if(!enrollmentData) document.getElementById('enrollModal').classList.add('visible');
-        setInterval(monitorSignal, 150);
-        renderLog();
+        
+        if(!enrollmentData) {
+            document.getElementById('enrollModal').classList.add('visible');
+        } else {
+            document.getElementById('statusMsg').innerText = "WELCOME BACK, " + enrollmentData.name;
+        }
+        setInterval(monitorSignal, 200);
     }
 
     async function setupCamera() {
         if(stream) stream.getTracks().forEach(t => t.stop());
-        const constraints = { video: { deviceId: devices[cameraIdx]?.deviceId, facingMode: 'environment' } };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         v.srcObject = stream;
     }
 
-    // --- ENHANCED FEATURE: LIVE SIGNAL FEEDBACK ---
+    function attemptRecovery() {
+        const name = document.getElementById('userName').value;
+        if(!name) return;
+        
+        fetch(GOOGLE_SCRIPT_URL, {method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", query: name})})
+        .then(r => r.json())
+        .then(data => {
+            if(data.found) {
+                cal = { sens: parseFloat(data.sens), syncCount: parseInt(data.syncCount), bInt: parseFloat(data.bInt), bGlu: parseFloat(data.bGlu) };
+                enrollmentData = { name: data.name, uid: data.uid, skin: data.skin || 1.0, thick: data.thick || 1.0 };
+            } else {
+                enrollmentData = { name: name, uid: "T-"+Math.floor(Math.random()*9000), skin: 1.0, thick: 1.0 };
+            }
+            localStorage.setItem('tathya_cal', JSON.stringify(cal));
+            localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+            document.getElementById('enrollModal').classList.remove('visible');
+            location.reload();
+        }).catch(e => {
+            // Offline fallback
+            enrollmentData = { name: name, uid: "OFFLINE", skin: 1.0, thick: 1.0 };
+            localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+            document.getElementById('enrollModal').classList.remove('visible');
+        });
+    }
+
     function monitorSignal() {
-        if(!torch) {
-            statusMsg.innerText = "TURN ON FLASH"; statusMsg.style.color = "var(--warn)";
-            signalFill.style.width = "0%"; return;
-        }
+        if(!torch) { document.getElementById('statusMsg').innerText = "FLASH OFF"; return; }
         ctx.drawImage(v, 0, 0, 50, 50);
         const pix = ctx.getImageData(0, 0, 50, 50).data;
         let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
-        const intensity = r / (pix.length/4);
-
-        // Map intensity to a 0-100 scale for the meter
-        let strength = Math.min(100, (intensity / 200) * 100);
-        signalFill.style.width = strength + "%";
-
-        if(intensity > 170) {
-            isLocked = true; target.className = "locked";
-            statusMsg.innerText = "SIGNAL LOCKED: GOOD"; statusMsg.style.color = "var(--accent)";
-            signalFill.style.background = "var(--accent)";
-        } else if (intensity > 100) {
-            isLocked = false; target.className = "too-light";
-            statusMsg.innerText = "LIGHT LEAK: COVER FULLY"; statusMsg.style.color = "var(--warn)";
-            signalFill.style.background = "var(--warn)";
-        } else {
-            isLocked = false; target.className = "";
-            statusMsg.innerText = "NO FINGER DETECTED"; statusMsg.style.color = "var(--error)";
-            signalFill.style.background = "var(--error)";
-        }
+        let intensity = r / (pix.length/4);
+        document.getElementById('statusMsg').innerText = intensity > 130 ? "SIGNAL LOCKED" : "ALIGN FINGER";
     }
 
-    async function runAnalysis() {
-        if(!isLocked) { alert("Please ensure the signal is LOCKED (Green Circle) before starting."); return; }
+    function runAnalysis() {
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
-        const start = Date.now(), duration = 45000;
+        const start = Date.now();
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
-            document.getElementById('timer').innerText = `${Math.ceil((duration-elapsed)/1000)}s`;
+            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/45000,1) * 816);
+            document.getElementById('timer').innerText = `${Math.ceil((45000-elapsed)/1000)}s`;
+            
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
             for(let i=0; i<pix.length; i+=4) r += pix[i];
             let inst = r / (pix.length/4);
+            
             if(elapsed > 5000) buffer.push(inst);
             pulseArr.push(inst); if(pulseArr.length > 50) pulseArr.shift();
             drawPulse();
-            if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
+            
+            if (elapsed >= 45000) { clearInterval(timer); finishAnalysis(); }
         }, 100);
-    }
-
-    function finishAnalysis() {
-        const sorted = buffer.sort((a,b) => a - b);
-        const clean = sorted.slice(Math.floor(sorted.length * 0.2), Math.floor(sorted.length * 0.8));
-        const avg = clean.reduce((a,b) => a + b, 0) / clean.length;
-        const result = Math.round(cal.bGlu + (cal.bInt - avg) * (cal.sens / (parseFloat(enrollmentData.density) || 1)));
-        
-        document.getElementById('gluResult').innerText = result;
-        const logEntry = { time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), val: result, raw: avg.toFixed(3), actual: "--" };
-        history.unshift(logEntry); if(history.length > 20) history.pop();
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({...logEntry, uid: enrollmentData?.uid})});
-        renderLog(); document.getElementById('scanBtn').disabled = false;
-        document.getElementById('timer').innerText = "DONE";
-    }
-
-    function syncCal() {
-        const val = parseFloat(document.getElementById('meterVal').value);
-        if(!val || history.length < 1) return;
-        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val; cal.syncCount++;
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        history[0].actual = val; renderLog();
-        alert("Synced! Accuracy improved.");
     }
 
     function drawPulse() {
@@ -205,6 +196,49 @@
         pCtx.stroke();
     }
 
+    function finishAnalysis() {
+        try {
+            const sorted = buffer.sort((a,b) => a - b);
+            const clean = sorted.slice(Math.floor(sorted.length * 0.2), Math.floor(sorted.length * 0.8));
+            const avg = clean.reduce((a,b) => a + b, 0) / clean.length;
+            
+            // --- BULLETPROOF MATH ---
+            const s = parseFloat(cal.sens) || 5.5;
+            const bG = parseFloat(cal.bGlu) || 100;
+            const bI = parseFloat(cal.bInt) || 220;
+            const skin = enrollmentData ? parseFloat(enrollmentData.skin) || 1.0 : 1.0;
+            
+            const result = Math.round(bG + (bI - avg) * (s / skin));
+            
+            if(isNaN(result)) throw "Math Error";
+
+            document.getElementById('gluResult').innerText = result;
+            history.unshift({ time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3) });
+            localStorage.setItem('tathya_hist', JSON.stringify(history));
+            updateUI();
+        } catch(e) {
+            alert("Calculation Error. Please re-sync with meter.");
+            document.getElementById('gluResult').innerText = "ERR";
+        }
+        document.getElementById('scanBtn').disabled = false;
+    }
+
+    function updateUI() {
+        calBar.style.width = Math.min((cal.syncCount / 10) * 100, 100) + "%";
+        document.getElementById('historyLog').innerHTML = history.map(h => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #222;"><span>${h.time}</span><b>${h.val}</b></div>`).join('');
+    }
+
+    function syncCal() {
+        const val = parseFloat(document.getElementById('meterVal').value);
+        if(!val || history.length < 1) return;
+        cal.bInt = parseFloat(history[0].raw);
+        cal.bGlu = val;
+        cal.syncCount++;
+        localStorage.setItem('tathya_cal', JSON.stringify(cal));
+        updateUI();
+        alert("Calibration Synced.");
+    }
+
     function switchTab(t) {
         document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
         document.querySelectorAll('.tab').forEach(tb => tb.classList.remove('active'));
@@ -212,9 +246,11 @@
         event.currentTarget.classList.add('active');
     }
 
-    async function toggleFlash() { const track = stream.getVideoTracks()[0]; torch = !torch; await track.applyConstraints({ advanced: [{ torch: torch }] }); }
-    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; setupCamera(); }
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #222; font-size:13px;"><span>${h.time}</span><b>${h.val} mg/dL</b></div>`).join(''); }
+    async function toggleFlash() {
+        const track = stream.getVideoTracks()[0];
+        torch = !torch;
+        await track.applyConstraints({ advanced: [{ torch: torch }] });
+    }
 
     window.onload = init;
 </script>
