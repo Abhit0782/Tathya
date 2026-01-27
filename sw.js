@@ -1,7 +1,7 @@
 const CACHE_NAME = 'tathya-monitor-v1';
 const urlsToCache = [
   './',
-  'indexlive.html',
+  'index.html',
   'manifest.json'
 ];
 
@@ -17,3 +17,4 @@ self.addEventListener('fetch', event => {
     caches.match(event.request).then(response => response || fetch(event.request))
   );
 });
+
