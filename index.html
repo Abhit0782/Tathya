@@ -285,8 +285,21 @@
     }
 
     function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density };
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
+        const fullData = { 
+            ...data, 
+            uid: enrollmentData ? enrollmentData.uid : "PENDING",
+            name: enrollmentData ? enrollmentData.name : "Guest",
+            profileDensity: enrollmentData ? enrollmentData.density : "1.0",
+            profileBaseline: enrollmentData ? enrollmentData.baseline : "220",
+            syncCount: cal.syncCount,
+            learnedSens: cal.sens
+        };
+
+        fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify(fullData)
+        });
     }
 
     function updateCalBar() {
@@ -314,5 +327,6 @@
 </script>
 </body>
 </html>
+
 
 
