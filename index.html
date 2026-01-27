@@ -127,33 +127,45 @@
         updateCalBar(); drawTrend(); renderLog();
     }
 
-    async function checkIdentity() {
+   async function checkIdentity() {
         const input = document.getElementById('userName').value.trim();
         if(!input) return alert("Please enter Name or ID");
 
-        // Request Cloud Revive
         try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", query: input}) });
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
+                method: 'POST', 
+                body: JSON.stringify({type: "REVIVE_REQUEST", query: input}) 
+            });
             const data = await resp.json();
             
             if(data.found) {
+                // Check if this is an old user without a UID
+                let finalUID = data.uid;
+                if(!finalUID || finalUID === "PENDING") {
+                    finalUID = generateUID(data.name);
+                    alert("Legacy Account Found! Your new Unique ID is: " + finalUID);
+                }
+
                 cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu };
-                enrollmentData = { name: data.name, uid: data.uid, density: data.density };
+                enrollmentData = { name: data.name, uid: finalUID, density: data.density };
+                
                 localStorage.setItem('tathya_cal', JSON.stringify(cal));
                 localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-                alert("Identity Revived: " + data.uid);
+                
+                // Push a migration log to the cloud to lock in the new UID
+                pushToCloud({type: "MIGRATION_SYNC", val: "UID_ASSIGNED"});
+                
                 document.getElementById('enrollModal').classList.remove('visible');
                 location.reload();
             } else {
-                // New User: Generate UID and proceed to fingers
+                // New User path remains the same
                 const newUID = generateUID(input);
                 enrollmentData = { name: input, uid: newUID };
                 document.getElementById('nameSection').style.display = "none";
                 document.getElementById('fingerSection').style.display = "block";
-                document.getElementById('enrollStatus').innerText = "Generating ID: " + newUID;
             }
         } catch(e) {
-            alert("Connection error. Proceeding as Guest.");
+            alert("Sync Error. Please check internet.");
         }
     }
 
@@ -302,3 +314,4 @@
 </script>
 </body>
 </html>
+
