@@ -1,7 +1,7 @@
 {
-  "name": "Tathya Glucose Monitor",
+  "name": "Tathya Pro Monitor",
   "short_name": "Tathya",
-  "start_url": "./indexlive.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#00e676",
@@ -18,3 +18,4 @@
     }
   ]
 }
+
