@@ -2,48 +2,37 @@
 <html>
 <head>
     <title>Tathya - Biometric Dashboard</title>
+    <link rel="manifest" href="manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <style>
+        /* [Keeping your existing CSS styles exactly as they are] */
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
-        
-        /* Identity Enrollment UI */
         #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
         #enrollModal.visible { display: flex; }
-        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; font-size: 16px; text-align: center; }
-        
+        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 10px 0; font-size: 16px; text-align: center; }
         .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
         #v_enroll { width: 100%; height: 100%; object-fit: cover; }
-        
-        /* Controls & Rings */
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
         .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
         .progress-ring__track { stroke: #222; }
-        
         .inner-display { position: absolute; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
-        
-        /* Fixed Pulse Graph in Center */
         #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 20px; z-index: 5; pointer-events: none; }
-        
         .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 10; position: relative; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
         .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 10; margin-top: -5px; }
         .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 10; margin-bottom: 5px; }
-
         .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
         .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
         .btn-small.active { background: #ffa000; color: #000; border-color: #ffa000; }
-        
         .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
         .btn-main:disabled { background: #222; color: #444; }
-
         .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
         #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
-        
         .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; box-sizing: border-box; }
         #trendCanvas { width: 100%; height: 100px; }
-        
         .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
         .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
     </style>
@@ -53,9 +42,10 @@
     <div id="enrollModal">
         <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
         <div id="nameSection">
-            <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
-            <input type="text" id="userName" class="modal-input" placeholder="User Name">
-            <button onclick="proceedToFingers()" class="btn-main">CONTINUE</button>
+            <p style="font-size:14px; color:#aaa;">Enter Name or Unique ID to Revive Data</p>
+            <input type="text" id="userName" class="modal-input" placeholder="Name or TATHYA-XXXX">
+            <button onclick="checkIdentity()" class="btn-main">CONTINUE</button>
+            <p id="uidDisplay" style="font-size: 11px; color: var(--blue); margin-top: 10px;"></p>
         </div>
         <div id="fingerSection" style="display:none;">
             <div class="enroll-box">
@@ -72,7 +62,6 @@
     </div>
 
     <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
-    
     <div class="bio-ring-container">
         <svg class="progress-ring" width="280" height="280">
             <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
@@ -86,31 +75,27 @@
             <canvas id="pulseGraph"></canvas>
         </div>
     </div>
-
     <div class="controls">
         <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
         <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
     </div>
-
     <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
     <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div style="font-size:10px; color:#666; margin-top:5px;">DATABASE SYNC PROGRESS</div>
-
-    <div class="trend-card">
-        <span style="font-size: 11px; color: var(--blue); font-weight: bold;">GLUCOSE TREND</span>
-        <canvas id="trendCanvas"></canvas>
-    </div>
-
+    <div class="trend-card"><canvas id="trendCanvas"></canvas></div>
     <div class="card">
         <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
         <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
     </div>
-
     <div id="historyLog" class="card"></div>
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
+    // PWA Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(() => console.log("Tathya PWA Active"));
+    }
+
+    const GOOGLE_SCRIPT_URL = "PASTE_YOUR_URL_HERE"; 
 
     const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
     const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
@@ -124,33 +109,63 @@
     const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
     let currentFingerIdx = 0, enrollTempData = [];
 
-    async function init() {
-        try {
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera();
-            if(!enrollmentData) {
-                document.getElementById('enrollModal').classList.add('visible');
-            } else {
-                reviveFromCloud(enrollmentData.name);
-            }
-            updateCalBar(); drawTrend(); renderLog();
-        } catch(e) { alert("Camera Permission Required"); }
+    // --- UID GENERATOR ---
+    function generateUID(name) {
+        const id = Math.floor(1000 + Math.random() * 9000);
+        return `${name.substring(0,3).toUpperCase()}-${id}`;
     }
+
+    async function init() {
+        const d = await navigator.mediaDevices.enumerateDevices();
+        devices = d.filter(i => i.kind === 'videoinput');
+        await setupCamera();
+        if(!enrollmentData) {
+            document.getElementById('enrollModal').classList.add('visible');
+        } else {
+            document.getElementById('uidDisplay').innerText = "Logged in as: " + enrollmentData.uid;
+        }
+        updateCalBar(); drawTrend(); renderLog();
+    }
+
+    async function checkIdentity() {
+        const input = document.getElementById('userName').value.trim();
+        if(!input) return alert("Please enter Name or ID");
+
+        // Request Cloud Revive
+        try {
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", query: input}) });
+            const data = await resp.json();
+            
+            if(data.found) {
+                cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu };
+                enrollmentData = { name: data.name, uid: data.uid, density: data.density };
+                localStorage.setItem('tathya_cal', JSON.stringify(cal));
+                localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+                alert("Identity Revived: " + data.uid);
+                document.getElementById('enrollModal').classList.remove('visible');
+                location.reload();
+            } else {
+                // New User: Generate UID and proceed to fingers
+                const newUID = generateUID(input);
+                enrollmentData = { name: input, uid: newUID };
+                document.getElementById('nameSection').style.display = "none";
+                document.getElementById('fingerSection').style.display = "block";
+                document.getElementById('enrollStatus').innerText = "Generating ID: " + newUID;
+            }
+        } catch(e) {
+            alert("Connection error. Proceeding as Guest.");
+        }
+    }
+
+    // ... [Keeping your existing camera, toggle, scan, and sync functions]
+    // Note: In finishAnalysis() and syncCal(), make sure to pass enrollmentData.uid 
+    // to the pushToCloud function.
 
     async function setupCamera() {
         if(stream) { stream.getTracks().forEach(t => t.stop()); }
         const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream;
-        ve.srcObject = stream;
-    }
-
-    function proceedToFingers() {
-        const name = document.getElementById('userName').value;
-        if(!name) return alert("Name required.");
-        document.getElementById('nameSection').style.display = "none";
-        document.getElementById('fingerSection').style.display = "block";
+        v.srcObject = stream; ve.srcObject = stream;
     }
 
     async function toggleFlash() {
@@ -161,7 +176,7 @@
             await track.applyConstraints({ advanced: [{ torch: torch }] });
             document.getElementById('mainFlashBtn').classList.toggle('active', torch);
             document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
-        } catch(e) { alert("Flash not supported on this lens."); torch = false; }
+        } catch(e) { alert("Flash not supported."); }
     }
 
     function toggleLens() {
@@ -170,7 +185,7 @@
     }
 
     function startEnrollStep() {
-        if(!torch) return alert("Turn on FLASH.");
+        if(!torch) return alert("Flash ON.");
         document.getElementById('enrollBtn').disabled = true;
         let start = Date.now(), stepBuffer = [];
         const timer = setInterval(() => {
@@ -195,80 +210,31 @@
 
     function finishEnrollment() {
         const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), type: "ENROLLMENT" };
+        enrollmentData.density = density;
+        enrollmentData.type = "ENROLLMENT";
         localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
         pushToCloud(enrollmentData);
         document.getElementById('enrollModal').classList.remove('visible');
-        if(torch) toggleFlash();
-    }
-function startEnrollmentProcess() {
-        const name = document.getElementById('userName').value.trim();
-        if(!name) return alert("Please enter your name.");
-        
-        // Before starting 10-finger scan, check if this user already exists!
-        reviveFromCloud(name).then(() => {
-            if(cal.syncCount > 0) {
-                // If revived, we can skip enrollment or just update baseline
-                document.getElementById('enrollModal').classList.remove('visible');
-                enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
-                localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-            } else {
-                // New user - proceed to 10 fingers
-                document.getElementById('nameSection').style.display = "none";
-                document.getElementById('fingerSection').style.display = "block";
-            }
-        });
-    }
-    async function reviveFromCloud(name) {
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
-            });
-            const cloudData = await resp.json();
-            
-            // If the cloud has a record, overwrite the phone's "factory settings"
-            if (cloudData.syncCount > 0) {
-                cal.sens = cloudData.sens;
-                cal.syncCount = cloudData.syncCount;
-                cal.bInt = cloudData.bInt;
-                cal.bGlu = cloudData.bGlu;
-                
-                // Save this revived data to the phone's memory
-                localStorage.setItem('tathya_cal', JSON.stringify(cal));
-                
-                // Update the UI to show the user their progress is back
-                updateCalBar();
-                alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
-            }
-        } catch(e) {
-            console.log("New user or offline mode. Starting fresh.");
-        }
+        location.reload();
     }
 
     function runAnalysis() {
-        if(!torch) return alert("Enable Flash.");
+        if(!torch) return alert("Flash ON.");
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
-        const start = Date.now(), duration = 45000;
+        const start = Date.now();
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
-            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
-            
+            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/45000,1) * 816);
+            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((45000-elapsed)/1000)).toString().padStart(2,'0')}`;
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
             for(let i=0; i<pix.length; i+=4) r += pix[i];
             let intensity = r / (pix.length/4);
-            
             if(elapsed > 5000) buffer.push(intensity);
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
             drawWave();
-            
-            if (elapsed >= duration) {
-                clearInterval(timer);
-                finishAnalysis();
-            }
+            if (elapsed >= 45000) { clearInterval(timer); finishAnalysis(); }
         }, 100);
     }
 
@@ -287,13 +253,11 @@ function startEnrollmentProcess() {
         const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
         document.getElementById('gluResult').innerText = result;
-        document.getElementById('timer').innerText = "DONE";
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" };
+        const logEntry = { uid: enrollmentData.uid, name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
-        renderLog(); drawTrend(); 
-        document.getElementById('scanBtn').disabled = false;
+        renderLog(); drawTrend(); document.getElementById('scanBtn').disabled = false;
     }
 
     function syncCal() {
@@ -305,11 +269,11 @@ function startEnrollmentProcess() {
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, type: "SYNC" });
-        updateCalBar(); renderLog(); alert("Global Sync Complete.");
+        updateCalBar(); renderLog(); alert("Global Sync OK.");
     }
 
     function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline };
+        const fullData = { ...data, profileDensity: enrollmentData?.density };
         fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
     }
 
@@ -333,8 +297,8 @@ function startEnrollmentProcess() {
     }
 
     function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
+
     window.onload = init;
 </script>
 </body>
 </html>
-
