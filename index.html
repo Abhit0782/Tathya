@@ -55,7 +55,7 @@
         <div id="nameSection">
             <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
             <input type="text" id="userName" class="modal-input" placeholder="User Name">
-            <button onclick="proceedToFingers()" class="btn-main">CONTINUE</button>
+            <button onclick="startEnrollmentProcess()" class="btn-main">CONTINUE</button>
         </div>
         <div id="fingerSection" style="display:none;">
             <div class="enroll-box">
@@ -133,7 +133,7 @@
             if(!enrollmentData) {
                 document.getElementById('enrollModal').classList.add('visible');
             } else {
-                reviveFromCloud(enrollmentData.name);
+                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
             }
             updateCalBar(); drawTrend(); renderLog();
         } catch(e) { alert("Camera Permission Required"); }
@@ -145,13 +145,6 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = stream;
         ve.srcObject = stream;
-    }
-
-    function proceedToFingers() {
-        const name = document.getElementById('userName').value;
-        if(!name) return alert("Name required.");
-        document.getElementById('nameSection').style.display = "none";
-        document.getElementById('fingerSection').style.display = "block";
     }
 
     async function toggleFlash() {
@@ -201,50 +194,48 @@
         pushToCloud(enrollmentData);
         document.getElementById('enrollModal').classList.remove('visible');
         if(torch) toggleFlash();
-    }
-// Triggered when user enters name in Step 1
-    function startEnrollmentProcess() {
+    }    
+    async function startEnrollmentProcess() {
         const name = document.getElementById('userName').value.trim();
         if(!name) return alert("Please enter your name.");
         
-        // Before starting 10-finger scan, check if this user already exists!
-        reviveFromCloud(name).then(() => {
-            if(cal.syncCount > 0) {
-                // If revived, we can skip enrollment or just update baseline
-                document.getElementById('enrollModal').classList.remove('visible');
-                enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
-                localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-            } else {
-                // New user - proceed to 10 fingers
-                document.getElementById('nameSection').style.display = "none";
-                document.getElementById('fingerSection').style.display = "block";
-            }
-        });
+        const isRevived = await reviveFromCloud(name, true); // `true` = show alert on success
+
+        if (isRevived) {
+            // User exists in cloud. Skip finger scanning.
+            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
+            localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+            document.getElementById('enrollModal').classList.remove('visible');
+        } else {
+            // New user. Proceed to finger scanning.
+            document.getElementById('nameSection').style.display = "none";
+            document.getElementById('fingerSection').style.display = "block";
+        }
     }
-  async function reviveFromCloud(name) {
+
+  async function reviveFromCloud(name, showAlert) {
         try {
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
             });
             const cloudData = await resp.json();
-            
-            // If the cloud has a record, overwrite the phone's "factory settings"
-            if (cloudData.syncCount > 0) {
+            if (cloudData && cloudData.syncCount > 0) {
                 cal.sens = cloudData.sens;
                 cal.syncCount = cloudData.syncCount;
                 cal.bInt = cloudData.bInt;
                 cal.bGlu = cloudData.bGlu;
-                
-                // Save this revived data to the phone's memory
                 localStorage.setItem('tathya_cal', JSON.stringify(cal));
-                
-                // Update the UI to show the user their progress is back
                 updateCalBar();
-                alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
+                if (showAlert) {
+                    alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
+                }
+                return true;
             }
+            return false;
         } catch(e) {
             console.log("New user or offline mode. Starting fresh.");
+            return false;
         }
     }
 
