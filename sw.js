@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tathya-monitor-v2'; // Changed to force update
+const CACHE_NAME = 'tathya-monitor-v3'; // Update version
 const urlsToCache = [
   './',
   'index.html',
@@ -6,9 +6,11 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', event => {
+  self.skipWaiting(); // Force this SW to become active immediately
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(urlsToCache))
+      .catch(err => console.error('Cache failed:', err))
   );
 });
 
@@ -29,6 +31,6 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim()) // Take control of all clients
   );
 });
