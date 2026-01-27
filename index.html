@@ -7,60 +7,59 @@
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
         
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+        #enrollModal.visible { display: flex; }
+        .finger-indicator { font-size: 14px; color: var(--blue); margin-top: 10px; font-weight: bold; letter-spacing: 1px; }
+        .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 20px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
+        #v_enroll { width: 100%; height: 100%; object-fit: cover; opacity: 0.5; }
+        .enroll-progress-text { position: absolute; font-size: 24px; font-weight: 800; color: var(--accent); }
+
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
         .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
         .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
         .progress-ring__track { stroke: #222; }
-
         .inner-display { position: absolute; width: 200px; height: 200px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
         #pulseGraph { position: absolute; width: 100%; height: 50px; bottom: 35px; pointer-events: none; }
-        
-        .result-container { display: flex; align-items: baseline; z-index: 2; }
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; }
-        #trendArrow { font-size: 24px; margin-left: 5px; font-weight: bold; }
+        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 2; }
         .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 2; }
         .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 2; margin-bottom: 5px; }
-
         .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
         .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
         .btn-small.active { background: #ffa000; color: #000; }
-
         .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
-        .btn-main:disabled { background: #222; color: #444; }
-
         .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
-        #calBar { width: 10%; height: 100%; background: #f44336; transition: width 0.5s; }
-        .cal-label { font-size: 10px; color: #666; margin-top: 5px; text-transform: uppercase; }
-
+        #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
         .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; }
-        #trendCanvas { width: 100%; height: 100px; margin-top: 10px; }
-
+        #trendCanvas { width: 100%; height: 100px; }
         .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
         .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
-        .log-meta { font-size: 10px; color: #555; display: block; }
-        input { background: #000; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 70px; text-align: center; }
+        input { background: #000; border: 1px solid #333; color: #fff; padding: 10px; border-radius: 8px; width: 100%; margin-top:10px; }
     </style>
 </head>
 <body>
 
-    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
-    <p style="font-size: 11px; color: #666; margin-bottom: 10px;">TRUTH IN METABOLIC ANALYTICS</p>
+    <div id="enrollModal">
+        <h2 style="color:var(--accent); margin:0;">BIO-ENROLLMENT</h2>
+        <p style="font-size:12px; color:#888;">Updating Identity for Smart Cloud Learning</p>
+        <div class="enroll-box">
+            <video id="v_enroll" autoplay playsinline muted></video>
+            <div id="enrollCounter" class="enroll-progress-text"></div>
+        </div>
+        <div id="enrollFingerName" class="finger-indicator">LEFT THUMB</div>
+        <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
+    </div>
 
+    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
     <div class="bio-ring-container">
         <svg class="progress-ring" width="280" height="280">
             <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
             <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
         </svg>
-
         <div class="inner-display">
             <video id="v" autoplay playsinline muted></video>
-            <div id="phaseLabel" style="font-size: 10px; color: var(--blue); position: absolute; top: 40px; font-weight: bold;">READY</div>
             <div id="timer" class="timer-text">--</div>
-            <div class="result-container">
-                <div id="gluResult" class="result-text">--</div>
-                <div id="trendArrow"></div>
-            </div>
+            <div id="gluResult" class="result-text">--</div>
             <div class="unit-text">mg/dL</div>
             <canvas id="pulseGraph"></canvas>
         </div>
@@ -72,111 +71,116 @@
     </div>
 
     <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
-    
     <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div id="calText" class="cal-label">Learning Level: Initial</div>
-
-    <div class="trend-card">
-        <span style="font-size: 12px; font-weight: bold; color: var(--blue);">GLUCOSE TREND (LAST 10)</span>
-        <canvas id="trendCanvas"></canvas>
-    </div>
-
+    <div id="calText" style="font-size: 10px; color: #666; margin-top: 5px;">SYNC PROGRESS</div>
+    <div class="trend-card"><canvas id="trendCanvas"></canvas></div>
     <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 12px; font-weight: bold; color: var(--blue);">ACTUAL METER SYNC</span>
-            <button onclick="syncCal()" style="background: var(--blue); border:none; color:white; padding:5px 15px; border-radius:5px; font-weight:bold;">SYNC</button>
-        </div>
-        <div style="display: flex; align-items: center; justify-content: space-between;">
-            <span style="font-size: 11px; color: #888;">Enter finger-prick value:</span>
-            <input type="number" id="meterVal" placeholder="100">
-        </div>
+        <button onclick="syncCal()" style="background: var(--blue); border:none; color:white; padding:10px; border-radius:10px; font-weight:bold; width:100%;">SYNC WITH METER</button>
+        <input type="number" id="meterVal" placeholder="Enter Actual Glucose">
     </div>
-
-    <div class="card">
-        <span style="font-size: 12px; font-weight: bold; color: var(--accent);">HISTORY & REFERENCE</span>
-        <div id="historyLog" style="margin-top:10px;"></div>
-    </div>
+    <div id="historyLog" class="card"></div>
 
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    // --- INTEGRATED SCRIPT URL ---
     const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
 
-    const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
+    const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
     const pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
     const clock = document.getElementById('clockProgress');
     const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
+    // --- LOAD OLD MEMORY FIRST ---
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
     let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
+    let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
+    
+    const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
+    let currentFingerIdx = 0;
+    let enrollTempData = [];
 
     async function init() {
         const d = await navigator.mediaDevices.enumerateDevices();
         devices = d.filter(i => i.kind === 'videoinput');
+        await setupCamera();
+        
+        // Show Enrollment only if it's never been done
+        if(!enrollmentData) document.getElementById('enrollModal').classList.add('visible');
+        
+        // This is the line that keeps your old progress!
+        updateCalBar(); 
+        
+        drawTrend(); renderLog();
+    }
+
+    async function setupCamera() {
+        if(stream) stream.getTracks().forEach(t => t.stop());
         const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
-        try {
-            if(stream) stream.getTracks().forEach(t => t.stop());
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            v.srcObject = stream;
-        } catch(e) { stream = await navigator.mediaDevices.getUserMedia({ video: true }); v.srcObject = stream; }
-        updateCalBar(); drawTrend(); renderLog();
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        v.srcObject = stream; ve.srcObject = stream;
     }
 
-    function updateCalBar() {
-        const count = cal.syncCount || 0;
-        let pct = (count / 10) * 100;
-        document.getElementById('calBar').style.width = Math.min(pct, 100) + "%";
-        const barCol = count < 3 ? "#f44336" : (count < 7 ? "#ffa000" : "#00e676");
-        const barTxt = count < 3 ? "Learning: Initial" : (count < 7 ? "Learning: Calibrating" : "Learning: Professional");
-        document.getElementById('calBar').style.background = barCol;
-        document.getElementById('calText').innerText = barTxt;
+    async function startEnrollStep() {
+        if(!torch) await toggleFlash();
+        document.getElementById('enrollBtn').disabled = true;
+        let stepBuffer = [];
+        let start = Date.now();
+        const enrollTimer = setInterval(() => {
+            let elapsed = Date.now() - start;
+            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
+            ctx.drawImage(ve, 0, 0, 50, 50);
+            let pix = ctx.getImageData(0, 0, 50, 50).data;
+            let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
+            stepBuffer.push(r / (pix.length/4));
+            if(elapsed >= 5000) {
+                clearInterval(enrollTimer);
+                const avg = stepBuffer.reduce((a,b)=>a+b,0) / stepBuffer.length;
+                enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: avg });
+                currentFingerIdx++;
+                if(currentFingerIdx < 10) {
+                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
+                    document.getElementById('enrollCounter').innerText = "";
+                    document.getElementById('enrollBtn').disabled = false;
+                } else { finishEnrollment(); }
+            }
+        }, 100);
     }
 
-    function drawTrend() {
-        if(history.length < 2) return;
-        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
-        tCtx.clearRect(0,0, tCanvas.width, tCanvas.height);
-        const data = [...history].reverse();
-        const vals = data.map(h => h.val);
-        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
-        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
-        data.forEach((h, i) => {
-            const x = (i / (data.length - 1)) * tCanvas.width;
-            const y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
-            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
-            tCtx.fillStyle = "#fff"; tCtx.fillRect(x-2, y-2, 4, 4);
-        });
-        tCtx.stroke();
+    function finishEnrollment() {
+        const thumb = enrollTempData[0].intensity;
+        const pinky = enrollTempData[4].intensity;
+        const density = (thumb / pinky).toFixed(2);
+        enrollmentData = { density: density, baseline: thumb.toFixed(2), timestamp: new Date(), type: "BIO_ENROLLMENT" };
+        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+        pushToCloud(enrollmentData);
+        document.getElementById('enrollModal').classList.remove('visible');
+        if(torch) toggleFlash();
     }
 
     async function toggleFlash() {
-        if(!stream) return;
         const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
-        if (!caps.torch) { alert("Switch lens for flash support."); return; }
         torch = !torch;
-        try { await track.applyConstraints({ advanced: [{ torch: torch }] }); document.getElementById('flashBtn').classList.toggle('active', torch); } catch(e) {}
+        await track.applyConstraints({ advanced: [{ torch: torch }] });
+        document.getElementById('flashBtn').classList.toggle('active', torch);
     }
 
-    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; init(); }
+    function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; setupCamera(); }
 
     function runAnalysis() {
-        if(!torch) { alert("Please turn FLASH on manually first."); return; }
+        if(!torch) { alert("Flash required."); return; }
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
-        const start = Date.now(), duration = 45000, circumference = 2 * Math.PI * 130;
+        const start = Date.now(), duration = 45000;
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            clock.style.strokeDashoffset = circumference - (Math.min(elapsed/duration,1) * circumference);
+            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
             ctx.drawImage(v, 0, 0, 50, 50);
             const pix = ctx.getImageData(0, 0, 50, 50).data;
             let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
             const intensity = r / (pix.length/4);
-            if(elapsed < 5000) document.getElementById('phaseLabel').innerText = "WARMING UP...";
-            else { document.getElementById('phaseLabel').innerText = "SCANNING..."; buffer.push(intensity); }
+            if(elapsed > 5000) buffer.push(intensity);
             pulseArr.push(intensity); if(pulseArr.length > 60) pulseArr.shift();
             drawWave();
             if (elapsed >= duration) { clearInterval(timer); finishAnalysis(); }
@@ -195,71 +199,56 @@
         pCtx.stroke();
     }
 
-    async function finishAnalysis() {
-        const sorted = buffer.sort((a,b)=>a-b);
-        const clean = sorted.slice(Math.floor(buffer.length*0.15), -Math.floor(buffer.length*0.15));
-        const avg = clean.reduce((a,b)=>a+b,0) / clean.length;
+    function finishAnalysis() {
+        const avg = buffer.reduce((a,b)=>a+b,0) / buffer.length;
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
-        
-        const arrow = document.getElementById('trendArrow');
-        if(history.length > 0) {
-            if(result > history[0].val + 5) { arrow.innerText = "↑"; arrow.style.color = "#f44336"; }
-            else if(result < history[0].val - 5) { arrow.innerText = "↓"; arrow.style.color = "#00e676"; }
-            else { arrow.innerText = "→"; arrow.style.color = "#aaa"; }
-        }
-
         document.getElementById('gluResult').innerText = result;
-        const logEntry = { 
-            time: new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}), 
-            val: result, 
-            raw: avg.toFixed(3),
-            actual: "--"
-        };
+        const logEntry = { time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", type: "SCAN" };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
-        
         pushToCloud(logEntry);
-        renderLog(); drawTrend(); resetUI();
+        renderLog(); drawTrend(); document.getElementById('scanBtn').disabled = false;
     }
 
     function syncCal() {
         const val = parseFloat(document.getElementById('meterVal').value);
-        if(!val || history.length < 1) return alert("Run a scan first.");
-        
+        if(!val || history.length < 1) return;
         history[0].actual = val;
-        const lastRaw = parseFloat(history[0].raw);
-        if(history.length > 1) {
-            const newSens = Math.abs((val - history[1].val) / (lastRaw - parseFloat(history[1].raw)));
-            if(newSens > 1 && newSens < 20) cal.sens = newSens;
-        }
-        cal.bInt = lastRaw; cal.bGlu = val;
-        cal.syncCount = (cal.syncCount || 0) + 1;
-        
+        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val;
+        cal.syncCount++;
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         localStorage.setItem('tathya_hist', JSON.stringify(history));
-        
         pushToCloud({ ...history[0], type: "SYNC_UPDATE" });
-        
-        updateCalBar(); renderLog(); alert("Tathya Reality Sync Complete.");
+        updateCalBar(); renderLog(); alert("Calibration Saved.");
     }
 
     function pushToCloud(data) {
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(data)})
-        .catch(e => console.log("Cloud sync delayed."));
+        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline };
+        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
     }
 
-    function renderLog() { 
-        document.getElementById('historyLog').innerHTML = history.map(h => `
-            <div class="log-item">
-                <div>
-                    <span>${h.time}</span>
-                    <span class="log-meta">Actual Meter: ${h.actual === "--" ? "Not Synced" : h.actual + " mg/dL"}</span>
-                </div>
-                <b>${h.val} mg/dL</b>
-            </div>`).join(''); 
+    function updateCalBar() {
+        const count = cal.syncCount || 0;
+        document.getElementById('calBar').style.width = Math.min((count/10)*100, 100) + "%";
+        document.getElementById('calBar').style.background = count < 3 ? "#f44336" : (count < 7 ? "#ffa000" : "#00e676");
     }
-    
-    function resetUI() { document.getElementById('scanBtn').disabled = false; }
+
+    function drawTrend() {
+        if(history.length < 2) return;
+        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
+        const data = [...history].reverse();
+        const vals = data.map(h => h.val);
+        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
+        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
+        data.forEach((h, i) => {
+            const x = (i / (data.length - 1)) * tCanvas.width;
+            const y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
+            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
+        });
+        tCtx.stroke();
+    }
+
+    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
     window.onload = init;
 </script>
 </body>
