@@ -9,7 +9,7 @@
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; --error: #ff5252; --warn: #ffd700; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         
-        /* Navigation */
+        /* Navigation Tabs */
         .tab-bar { display: flex; width: 100%; background: #111; border-bottom: 1px solid #222; position: sticky; top: 0; z-index: 100; }
         .tab { flex: 1; padding: 15px; text-align: center; font-size: 11px; font-weight: bold; color: #555; cursor: pointer; }
         .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
@@ -17,8 +17,8 @@
         .view-section { display: none; width: 100%; max-width: 450px; padding: 20px; box-sizing: border-box; }
         .view-section.active { display: flex; flex-direction: column; align-items: center; }
 
-        /* Enrollment Overlay */
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 30px; }
+        /* Enrollment/Recovery Overlay */
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; }
         #enrollModal.visible { display: flex; }
         .modal-input { width: 100%; padding: 12px; background: #111; border: 1px solid #333; color: #fff; border-radius: 8px; margin-bottom: 15px; }
 
@@ -28,11 +28,14 @@
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
         #pulseGraph { position: absolute; width: 100%; height: 100px; bottom: 10px; z-index: 5; pointer-events: none; }
         
-        .cal-progress-container { width: 100%; height: 6px; background: #222; border-radius: 3px; margin: 10px 0; overflow: hidden; }
-        #calBar { width: 0%; height: 100%; background: var(--accent); transition: width 0.5s; }
+        .cal-progress-container { width: 100%; height: 8px; background: #222; border-radius: 4px; margin: 15px 0 5px 0; overflow: hidden; border: 1px solid #333; }
+        #calBar { width: 0%; height: 100%; background: var(--accent); transition: width 0.5s; box-shadow: 0 0 10px var(--accent); }
 
         .result-text { font-size: 60px; font-weight: 800; color: var(--accent); z-index: 10; margin: 0; }
         .btn-main { width: 100%; padding: 18px; border-radius: 12px; border: none; background: var(--accent); color: #000; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .btn-small { flex: 1; background: #111; border: 1px solid #333; color: #fff; padding: 12px; border-radius: 10px; font-size: 12px; cursor: pointer; font-weight: bold; }
+        .btn-small.active { background: var(--accent); color: #000; }
+
         #trendChart { width: 100%; height: 200px; background: #000; border-radius: 12px; border: 1px solid #222; margin-top: 10px; }
     </style>
 </head>
@@ -45,14 +48,18 @@
     </div>
 
     <div id="enrollModal">
-        <h2 style="color:var(--accent);">RECOVER ACCOUNT</h2>
-        <input type="text" id="userName" class="modal-input" placeholder="Enter Old Name or ID">
-        <button onclick="attemptRecovery()" class="btn-main">RESTORE MEMORY</button>
-        <p style="font-size:10px; color:#555; margin-top:10px;">If no account found, a new one will be created.</p>
+        <h2 style="color:var(--accent);">RESTORE TATHYA</h2>
+        <input type="text" id="userName" class="modal-input" placeholder="Enter Full Name">
+        <div style="display:flex; gap:10px; width:100%; margin-bottom:15px;">
+            <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
+            <button id="modalFlash" class="btn-small" onclick="toggleFlash()">🔦 FLASH</button>
+        </div>
+        <button onclick="attemptRecovery()" class="btn-main">INITIALIZE CLOUD</button>
+        <p style="font-size:10px; color:#555; margin-top:15px;">Select lens where flash is visible before scanning.</p>
     </div>
 
     <div id="scanView" class="view-section active">
-        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--warn);">INITIALIZING...</div>
+        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--warn); height:15px;">WAITING...</div>
         
         <div class="bio-ring-container">
             <svg class="progress-ring" width="280" height="280">
@@ -68,13 +75,18 @@
         </div>
 
         <div class="cal-progress-container"><div id="calBar"></div></div>
-        <div style="font-size:9px; color:#555; margin-bottom:15px;">CALIBRATION LEVEL</div>
+        <div style="font-size:9px; color:#555; margin-bottom:10px; text-transform:uppercase; letter-spacing:1px;">Calibration Confidence</div>
 
-        <button id="scanBtn" class="btn-main" onclick="runAnalysis()">START SCAN</button>
+        <div style="display:flex; gap:10px; width:100%; margin-bottom:15px;">
+            <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
+            <button id="mainFlash" class="btn-small" onclick="toggleFlash()">🔦 FLASH</button>
+        </div>
+
+        <button id="scanBtn" class="btn-main" onclick="runAnalysis()">START PRECISION SCAN</button>
         
-        <div class="card" style="width:100%; margin-top:15px; background:#111; padding:15px; border-radius:12px;">
-            <input type="number" id="meterVal" placeholder="Meter Value" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
-            <button onclick="syncCal()" style="width:100%; background:var(--blue); color:white; padding:12px; border-radius:8px; border:none; font-weight:bold;">SYNC CLOUD</button>
+        <div class="card" style="width:100%; margin-top:15px; background:#111; padding:15px; border-radius:12px; border:1px solid #222;">
+            <input type="number" id="meterVal" placeholder="Meter Glucose" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
+            <button onclick="syncCal()" style="width:100%; background:var(--blue); color:white; padding:12px; border-radius:8px; border:none; font-weight:bold;">SYNC ACTUAL DATA</button>
         </div>
     </div>
 
@@ -84,6 +96,7 @@
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
+    // Replace with your Google Script URL
     const GOOGLE_SCRIPT_URL = "PASTE_YOUR_URL_HERE";
     
     const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
@@ -92,21 +105,23 @@
     
     let stream, torch = false, buffer = [], pulseArr = [], devices = [], cameraIdx = 0;
     
-    // --- NANO-BANANA MEMORY RECOVERY ---
+    // Core data objects
     let cal = { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
     let history = [];
     let enrollmentData = null;
 
     async function loadStoredData() {
-        const storedCal = localStorage.getItem('tathya_cal');
-        const storedHist = localStorage.getItem('tathya_hist');
-        const storedEnroll = localStorage.getItem('tathya_enroll');
+        try {
+            const storedCal = localStorage.getItem('tathya_cal');
+            const storedHist = localStorage.getItem('tathya_hist');
+            const storedEnroll = localStorage.getItem('tathya_enroll');
 
-        if(storedCal) cal = JSON.parse(storedCal);
-        if(storedHist) history = JSON.parse(storedHist);
-        if(storedEnroll) enrollmentData = JSON.parse(storedEnroll);
-
-        updateUI();
+            if(storedCal) cal = JSON.parse(storedCal);
+            if(storedHist) history = JSON.parse(storedHist);
+            if(storedEnroll) enrollmentData = JSON.parse(storedEnroll);
+            
+            updateUI();
+        } catch(e) { console.error("Memory read error"); }
     }
 
     async function init() {
@@ -118,14 +133,15 @@
         if(!enrollmentData) {
             document.getElementById('enrollModal').classList.add('visible');
         } else {
-            document.getElementById('statusMsg').innerText = "WELCOME BACK, " + enrollmentData.name;
+            document.getElementById('statusMsg').innerText = "IDENTIFIED: " + enrollmentData.name;
         }
         setInterval(monitorSignal, 200);
     }
 
     async function setupCamera() {
         if(stream) stream.getTracks().forEach(t => t.stop());
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment' } };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = stream;
     }
 
@@ -138,7 +154,7 @@
         .then(data => {
             if(data.found) {
                 cal = { sens: parseFloat(data.sens), syncCount: parseInt(data.syncCount), bInt: parseFloat(data.bInt), bGlu: parseFloat(data.bGlu) };
-                enrollmentData = { name: data.name, uid: data.uid, skin: data.skin || 1.0, thick: data.thick || 1.0 };
+                enrollmentData = { name: data.name, uid: data.uid, skin: 1.0, thick: 1.0 };
             } else {
                 enrollmentData = { name: name, uid: "T-"+Math.floor(Math.random()*9000), skin: 1.0, thick: 1.0 };
             }
@@ -147,8 +163,7 @@
             document.getElementById('enrollModal').classList.remove('visible');
             location.reload();
         }).catch(e => {
-            // Offline fallback
-            enrollmentData = { name: name, uid: "OFFLINE", skin: 1.0, thick: 1.0 };
+            enrollmentData = { name: name, uid: "GUEST", skin: 1.0, thick: 1.0 };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
             document.getElementById('enrollModal').classList.remove('visible');
         });
@@ -160,10 +175,11 @@
         const pix = ctx.getImageData(0, 0, 50, 50).data;
         let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
         let intensity = r / (pix.length/4);
-        document.getElementById('statusMsg').innerText = intensity > 130 ? "SIGNAL LOCKED" : "ALIGN FINGER";
+        document.getElementById('statusMsg').innerText = intensity > 130 ? "SIGNAL LOCKED" : "PLACE FINGER";
     }
 
     function runAnalysis() {
+        if(!torch) return alert("Enable Flash.");
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
         const start = Date.now();
@@ -202,29 +218,26 @@
             const clean = sorted.slice(Math.floor(sorted.length * 0.2), Math.floor(sorted.length * 0.8));
             const avg = clean.reduce((a,b) => a + b, 0) / clean.length;
             
-            // --- BULLETPROOF MATH ---
             const s = parseFloat(cal.sens) || 5.5;
             const bG = parseFloat(cal.bGlu) || 100;
             const bI = parseFloat(cal.bInt) || 220;
-            const skin = enrollmentData ? parseFloat(enrollmentData.skin) || 1.0 : 1.0;
             
-            const result = Math.round(bG + (bI - avg) * (s / skin));
-            
-            if(isNaN(result)) throw "Math Error";
+            const result = Math.round(bG + (bI - avg) * s);
+            if(isNaN(result)) throw "NaN";
 
             document.getElementById('gluResult').innerText = result;
             history.unshift({ time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3) });
             localStorage.setItem('tathya_hist', JSON.stringify(history));
             updateUI();
-        } catch(e) {
-            alert("Calculation Error. Please re-sync with meter.");
-            document.getElementById('gluResult').innerText = "ERR";
-        }
+            
+            fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({val:result, raw:avg, name:enrollmentData.name, type:"SCAN"})});
+        } catch(e) { document.getElementById('gluResult').innerText = "ERR"; }
         document.getElementById('scanBtn').disabled = false;
     }
 
     function updateUI() {
-        calBar.style.width = Math.min((cal.syncCount / 10) * 100, 100) + "%";
+        const count = parseInt(cal.syncCount) || 0;
+        calBar.style.width = Math.min((count / 10) * 100, 100) + "%";
         document.getElementById('historyLog').innerHTML = history.map(h => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #222;"><span>${h.time}</span><b>${h.val}</b></div>`).join('');
     }
 
@@ -236,7 +249,7 @@
         cal.syncCount++;
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         updateUI();
-        alert("Calibration Synced.");
+        alert("Synced to Cloud Database.");
     }
 
     function switchTab(t) {
@@ -250,6 +263,13 @@
         const track = stream.getVideoTracks()[0];
         torch = !torch;
         await track.applyConstraints({ advanced: [{ torch: torch }] });
+        document.getElementById('mainFlash').classList.toggle('active', torch);
+        document.getElementById('modalFlash').classList.toggle('active', torch);
+    }
+
+    function toggleLens() {
+        cameraIdx = (cameraIdx + 1) % devices.length;
+        setupCamera();
     }
 
     window.onload = init;
