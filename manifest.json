@@ -1,5 +1,5 @@
 {
-  "name": "Tathya Pro",
+  "name": "tathya-monitor-v1",
   "short_name": "Tathya",
   "start_url": "./index.html",
   "display": "standalone",
@@ -18,5 +18,6 @@
     }
   ]
 }
+
 
 
