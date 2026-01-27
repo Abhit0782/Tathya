@@ -9,7 +9,6 @@
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; --error: #ff5252; --warn: #ffd700; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
         
-        /* Navigation */
         .tab-bar { display: flex; width: 100%; background: #111; border-bottom: 1px solid #222; position: sticky; top: 0; z-index: 100; }
         .tab { flex: 1; padding: 15px; text-align: center; font-size: 11px; font-weight: bold; color: #555; cursor: pointer; }
         .tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
@@ -18,7 +17,7 @@
         .view-section.active { display: flex; flex-direction: column; align-items: center; }
 
         /* Enrollment Form Overlay */
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: left; overflow-y: auto; }
+        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: left; }
         #enrollModal.visible { display: flex; }
         .form-group { width: 100%; margin-bottom: 15px; }
         .form-label { font-size: 10px; color: var(--blue); font-weight: bold; margin-bottom: 5px; display: block; text-transform: uppercase; }
@@ -28,7 +27,7 @@
         .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; }
         .inner-display { position: absolute; top: 30px; left: 30px; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 2px solid #222; }
         #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.3; filter: grayscale(1); }
-        #pulseGraph { position: absolute; width: 100%; height: 100px; bottom: 20px; z-index: 5; pointer-events: none; }
+        #pulseGraph { position: absolute; width: 100%; height: 100px; bottom: 10px; z-index: 5; pointer-events: none; }
         
         #targetCircle { position: absolute; width: 90px; height: 90px; border: 2px dashed #444; border-radius: 50%; z-index: 15; transition: all 0.2s; }
         #targetCircle.locked { border: 4px solid var(--accent); transform: scale(0.8); box-shadow: 0 0 20px var(--accent); }
@@ -50,36 +49,28 @@
 
     <div id="enrollModal">
         <h2 style="color:var(--accent); margin-bottom: 20px;">BIO-REGISTRATION</h2>
-        
+        <div class="form-group"><label class="form-label">Name</label><input type="text" id="userName" class="modal-input" placeholder="Full Name"></div>
         <div class="form-group">
-            <label class="form-label">User Identity</label>
-            <input type="text" id="userName" class="modal-input" placeholder="Enter Full Name">
-        </div>
-
-        <div class="form-group">
-            <label class="form-label">Skin Tone Profile</label>
+            <label class="form-label">Skin Tone</label>
             <select id="userSkin" class="modal-input">
-                <option value="1.0">Fair / Light</option>
-                <option value="1.1">Medium / Olive</option>
-                <option value="1.25">Dark / Deep</option>
+                <option value="1.0">Light</option>
+                <option value="1.1">Medium</option>
+                <option value="1.2">Dark</option>
             </select>
         </div>
-
         <div class="form-group">
-            <label class="form-label">Tissue Density</label>
+            <label class="form-label">Thickness</label>
             <select id="userThick" class="modal-input">
-                <option value="0.9">Thin Fingers</option>
+                <option value="0.9">Thin</option>
                 <option value="1.0">Average</option>
-                <option value="1.15">Thick Fingers</option>
+                <option value="1.1">Thick</option>
             </select>
         </div>
-
-        <button onclick="registerUser()" class="btn-main">INITIALIZE CALIBRATION</button>
-        <p style="font-size:10px; color:#555; margin-top:15px; text-align:center;">Data is synced with Google Cloud Database</p>
+        <button onclick="registerUser()" class="btn-main">SAVE & START</button>
     </div>
 
     <div id="scanView" class="view-section active">
-        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--error);">WAITING FOR LENS...</div>
+        <div id="statusMsg" style="font-size:10px; font-weight:bold; color:var(--error); height:15px;">WAITING FOR FLASH...</div>
         
         <div class="bio-ring-container">
             <svg class="progress-ring" width="280" height="280">
@@ -103,25 +94,18 @@
         <button id="scanBtn" class="btn-main" onclick="runAnalysis()">START SCAN</button>
         
         <div style="width:100%; margin-top:15px; background:#111; padding:15px; border-radius:12px; border:1px solid #222;">
-            <input type="number" id="meterVal" placeholder="Actual Glucose Reading" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
-            <button onclick="syncCal()" style="width:100%; background:var(--blue); border:none; color:white; padding:12px; border-radius:8px; font-weight:bold;">SYNC CLOUD DATA</button>
+            <input type="number" id="meterVal" placeholder="Meter Glucose" style="width:100%; background:black; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-bottom:10px;">
+            <button onclick="syncCal()" style="width:100%; background:var(--blue); border:none; color:white; padding:12px; border-radius:8px; font-weight:bold;">SYNC DATA</button>
         </div>
     </div>
 
-    <div id="analyticsView" class="view-section">
-        <h3 style="margin:0; color:var(--blue);">USER TREND CHART</h3>
-        <canvas id="trendChart"></canvas>
-    </div>
-
-    <div id="historyView" class="view-section">
-        <h3 style="margin:0; color:var(--accent);">HISTORY LOG</h3>
-        <div id="historyLog" style="width:100%; margin-top:15px;"></div>
-    </div>
+    <div id="analyticsView" class="view-section"><canvas id="trendChart"></canvas></div>
+    <div id="historyView" class="view-section"><div id="historyLog" style="width:100%;"></div></div>
 
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6Knllc (PASTE YOUR URL)";
+    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec";
     
     const v = document.getElementById('v'), c = document.getElementById('c'), ctx = c.getContext('2d');
     const target = document.getElementById('targetCircle'), statusMsg = document.getElementById('statusMsg');
@@ -134,14 +118,14 @@
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
 
     async function init() {
-        const d = await navigator.mediaDevices.enumerateDevices();
-        devices = d.filter(i => i.kind === 'videoinput');
-        await setupCamera();
-        if(!enrollmentData) document.getElementById('enrollModal').classList.add('visible');
-        else reviveFromCloud(enrollmentData.name);
-        
-        setInterval(monitorSignal, 150);
-        renderLog();
+        try {
+            const d = await navigator.mediaDevices.enumerateDevices();
+            devices = d.filter(i => i.kind === 'videoinput');
+            await setupCamera();
+            if(!enrollmentData) document.getElementById('enrollModal').classList.add('visible');
+            setInterval(monitorSignal, 150);
+            renderLog();
+        } catch(e) { alert("Camera Permission Required"); }
     }
 
     async function setupCamera() {
@@ -151,40 +135,33 @@
         v.srcObject = stream;
     }
 
-    // --- FORM LOGIC ---
     function registerUser() {
         const name = document.getElementById('userName').value;
-        if(!name) return alert("Name is required.");
-        
-        enrollmentData = {
-            name: name,
-            skin: document.getElementById('userSkin').value,
-            thick: document.getElementById('userThick').value,
-            uid: "T-" + Math.floor(1000 + Math.random() * 9000)
-        };
+        if(!name) return;
+        enrollmentData = { name, skin: document.getElementById('userSkin').value, thick: document.getElementById('userThick').value };
         localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
         document.getElementById('enrollModal').classList.remove('visible');
-        pushToCloud({type: "REGISTRATION"});
     }
 
     function monitorSignal() {
-        if(!torch) { statusMsg.innerText = "ACTIVATE FLASH"; return; }
+        if(!torch) { statusMsg.innerText = "TURN ON FLASH"; return; }
         ctx.drawImage(v, 0, 0, 50, 50);
         const pix = ctx.getImageData(0, 0, 50, 50).data;
         let r = 0; for(let i=0; i<pix.length; i+=4) r += pix[i];
         const intensity = r / (pix.length/4);
 
-        if(intensity > 170) {
+        // Flexible Lock Threshold: 130 instead of 170
+        if(intensity > 130) {
             isLocked = true; target.className = "locked";
             statusMsg.innerText = "SIGNAL LOCKED"; statusMsg.style.color = "var(--accent)";
         } else {
             isLocked = false; target.className = "";
-            statusMsg.innerText = "ADJUST FINGER PLACEMENT"; statusMsg.style.color = "var(--warn)";
+            statusMsg.innerText = "PLACE FINGER ON LENS"; statusMsg.style.color = "var(--warn)";
         }
     }
 
     function runAnalysis() {
-        if(!isLocked) return alert("Signal must be Locked (Green Circle)");
+        if(!isLocked) return alert("Adjust placement until circle turns Green");
         document.getElementById('scanBtn').disabled = true;
         buffer = []; pulseArr = [];
         const start = Date.now();
@@ -192,16 +169,13 @@
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/45000,1) * 816);
             document.getElementById('timer').innerText = `${Math.ceil((45000-elapsed)/1000)}s`;
-            
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
             for(let i=0; i<pix.length; i+=4) r += pix[i];
             let inst = r / (pix.length/4);
-            
             if(elapsed > 5000) buffer.push(inst);
             pulseArr.push(inst); if(pulseArr.length > 50) pulseArr.shift();
             drawPulse();
-            
             if (elapsed >= 45000) { clearInterval(timer); finishAnalysis(); }
         }, 100);
     }
@@ -221,33 +195,28 @@
         const sorted = buffer.sort((a,b) => a - b);
         const clean = sorted.slice(Math.floor(sorted.length * 0.2), Math.floor(sorted.length * 0.8));
         const avg = clean.reduce((a,b) => a + b, 0) / clean.length;
-        
-        // Calibration Factor
         const factor = (parseFloat(enrollmentData.skin) * parseFloat(enrollmentData.thick));
         const result = Math.round(cal.bGlu + (cal.bInt - avg) * (cal.sens / factor));
-        
         document.getElementById('gluResult').innerText = result;
-        const logEntry = { time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--" };
-        history.unshift(logEntry); if(history.length > 15) history.pop();
+        history.unshift({ time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3) });
+        if(history.length > 15) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
-        
-        pushToCloud(logEntry);
+        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({val:result, name: enrollmentData.name})});
         renderLog(); document.getElementById('scanBtn').disabled = false;
-        document.getElementById('timer').innerText = "DONE";
+        document.getElementById('timer').innerText = "READY";
     }
 
-    // --- ANALYTICS CHART ---
     function drawTrendChart() {
         if(history.length < 2) return;
-        chartCanvas.width = chartCanvas.parentElement.offsetWidth; chartCanvas.height = 250;
+        chartCanvas.width = chartCanvas.parentElement.offsetWidth; chartCanvas.height = 200;
         const data = [...history].reverse();
         const vals = data.map(h => h.val);
         const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
-
+        chartCtx.clearRect(0,0,chartCanvas.width, chartCanvas.height);
         chartCtx.beginPath(); chartCtx.strokeStyle = "var(--blue)"; chartCtx.lineWidth = 3;
         data.forEach((h, i) => {
             const x = (i / (data.length - 1)) * chartCanvas.width;
-            const y = 250 - ((h.val - min) / range * 250);
+            const y = 200 - ((h.val - min) / range * 200);
             if(i === 0) chartCtx.moveTo(x,y); else chartCtx.lineTo(x,y);
         });
         chartCtx.stroke();
@@ -261,11 +230,22 @@
         if(t === 'analytics') drawTrendChart();
     }
 
-    async function toggleFlash() { const track = stream.getVideoTracks()[0]; torch = !torch; await track.applyConstraints({ advanced: [{ torch: torch }] }); }
+    async function toggleFlash() {
+        const track = stream.getVideoTracks()[0];
+        torch = !torch;
+        await track.applyConstraints({ advanced: [{ torch: torch }] });
+        document.getElementById('mainFlash').style.borderColor = torch ? "var(--accent)" : "#333";
+    }
+
     function toggleLens() { cameraIdx = (cameraIdx + 1) % devices.length; setupCamera(); }
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #222;"><span>${h.time}</span><b>${h.val} mg/dL</b></div>`).join(''); }
-    function pushToCloud(d) { fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify({...d, uid: enrollmentData?.uid, name: enrollmentData?.name})}); }
-    
+    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div style="display:flex; justify-content:space-between; padding:10px; border-bottom:1px solid #222;"><span>${h.time}</span><b>${h.val}</b></div>`).join(''); }
+    function syncCal() {
+        const val = parseFloat(document.getElementById('meterVal').value);
+        if(!val || history.length < 1) return;
+        cal.bInt = parseFloat(history[0].raw); cal.bGlu = val;
+        localStorage.setItem('tathya_cal', JSON.stringify(cal));
+        alert("Sync Complete");
+    }
     window.onload = init;
 </script>
 </body>
