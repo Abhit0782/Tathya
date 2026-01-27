@@ -201,17 +201,49 @@
         document.getElementById('enrollModal').classList.remove('visible');
         if(torch) toggleFlash();
     }
-
+function startEnrollmentProcess() {
+        const name = document.getElementById('userName').value.trim();
+        if(!name) return alert("Please enter your name.");
+        
+        // Before starting 10-finger scan, check if this user already exists!
+        reviveFromCloud(name).then(() => {
+            if(cal.syncCount > 0) {
+                // If revived, we can skip enrollment or just update baseline
+                document.getElementById('enrollModal').classList.remove('visible');
+                enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
+                localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+            } else {
+                // New user - proceed to 10 fingers
+                document.getElementById('nameSection').style.display = "none";
+                document.getElementById('fingerSection').style.display = "block";
+            }
+        });
+    }
     async function reviveFromCloud(name) {
         try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { method:'POST', body:JSON.stringify({type:"REVIVE_REQUEST", name: name}) });
-            const data = await resp.json();
-            if(data.syncCount > cal.syncCount) {
-                cal = { sens: data.sens, syncCount: data.syncCount, bInt: data.bInt, bGlu: data.bGlu };
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
+                method: 'POST', 
+                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
+            });
+            const cloudData = await resp.json();
+            
+            // If the cloud has a record, overwrite the phone's "factory settings"
+            if (cloudData.syncCount > 0) {
+                cal.sens = cloudData.sens;
+                cal.syncCount = cloudData.syncCount;
+                cal.bInt = cloudData.bInt;
+                cal.bGlu = cloudData.bGlu;
+                
+                // Save this revived data to the phone's memory
                 localStorage.setItem('tathya_cal', JSON.stringify(cal));
+                
+                // Update the UI to show the user their progress is back
                 updateCalBar();
+                alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
             }
-        } catch(e) {}
+        } catch(e) {
+            console.log("New user or offline mode. Starting fresh.");
+        }
     }
 
     function runAnalysis() {
@@ -305,3 +337,4 @@
 </script>
 </body>
 </html>
+
