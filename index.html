@@ -84,6 +84,7 @@
             <div id="gluResult" class="result-text">--</div>
             <div class="unit-text">mg/dL</div>
             <div id="sigStatus" style="font-size:10px; color:#888; position:absolute; top:60px; font-weight:bold; letter-spacing:1px;">READY</div>
+            <div id="bpmVal" style="font-size:14px; color:#f44336; position:absolute; top:80px; font-weight:bold;">-- BPM</div>
             <canvas id="pulseGraph"></canvas>
         </div>
     </div>
@@ -262,6 +263,7 @@
             if(elapsed > 5000) buffer.push(intensity);
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
             drawWave();
+            updateBPM();
             
             if (elapsed >= duration) {
                 clearInterval(timer);
@@ -280,6 +282,23 @@
                 }
             }
         }, 100);
+    }
+
+    function updateBPM() {
+        if(pulseArr.length < 40) return;
+        // Smooth data to remove camera noise
+        let smooth = [];
+        for(let i=2; i<pulseArr.length-2; i++) {
+            smooth.push((pulseArr[i-2] + pulseArr[i-1] + pulseArr[i] + pulseArr[i+1] + pulseArr[i+2])/5);
+        }
+        // Count peaks (local maxima above mean)
+        let peaks = 0, mean = smooth.reduce((a,b)=>a+b,0)/smooth.length;
+        for(let i=1; i<smooth.length-1; i++) {
+            if(smooth[i] > mean && smooth[i] > smooth[i-1] && smooth[i] > smooth[i+1]) peaks++;
+        }
+        // 50 frames @ 100ms = 5 seconds. BPM = peaks * (60/5) = peaks * 12
+        let bpm = peaks * 12;
+        if(bpm > 50 && bpm < 180) document.getElementById('bpmVal').innerText = bpm + " ♥";
     }
 
     function drawWave() {
@@ -384,4 +403,3 @@
 </script>
 </body>
 </html>
-
