@@ -404,13 +404,22 @@
             learningRate = 1 / (Math.sqrt(cal.syncCount + 1) + 1);
             baselineWeight = Math.max(0.15, 0.5 / (cal.syncCount * 0.5 + 1));
         }
+
+        // EMERGENCY CORRECTION: If discrepancy is huge (>30mg/dL), force aggressive learning
+        // regardless of sync count or lock status. This fixes the "stuck" low reading issue.
+        const predictedVal = parseFloat(history[0].val);
+        if (Math.abs(predictedVal - val) > 30) {
+             learningRate = 0.5;
+             baselineWeight = 0.5;
+        }
         // --- END CONFIDENCE LOCK ---
 
         // Adaptive Learning: Calculate new sensitivity based on this correction
         // SMART FILTER: Only learn if the signal was stable (low noise) AND it changed significantly.
         if (Math.abs(currentRaw - prevRaw) > 5 && currentNoise < 50) {
             const indicatedSens = (val - prevGlu) / (prevRaw - currentRaw);
-            if (indicatedSens > 0.5 && indicatedSens < 20) {
+            // Widen the upper limit to 50 (was 20) to allow for large corrections
+            if (indicatedSens > 0.5 && indicatedSens < 50) {
                 cal.sens = (cal.sens * (1 - learningRate)) + (indicatedSens * learningRate);
             }
         } else if (currentNoise >= 50) {
