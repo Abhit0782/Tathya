@@ -375,7 +375,11 @@
         }
 
         history[0].actual = val;
-        cal.bInt = currentRaw; cal.bGlu = val;
+        // SMOOTHED BASELINE: Use a weighted average to prevent drastic jumps from one reading.
+        // This makes the model more stable and resilient to single outliers.
+        const baselineWeight = 0.3; // New readings contribute 30% to the new baseline.
+        cal.bGlu = (cal.bGlu * (1 - baselineWeight)) + (val * baselineWeight);
+        cal.bInt = (cal.bInt * (1 - baselineWeight)) + (currentRaw * baselineWeight);
         cal.syncCount++;
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         localStorage.setItem('tathya_hist', JSON.stringify(history));
