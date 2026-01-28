@@ -376,8 +376,9 @@
 
         history[0].actual = val;
         // SMOOTHED BASELINE: Use a weighted average to prevent drastic jumps from one reading.
-        // This makes the model more stable and resilient to single outliers.
-        const baselineWeight = 0.3; // New readings contribute 30% to the new baseline.
+        // ADAPTIVE WEIGHT: Learn aggressively at first, then stabilize.
+        // Weight starts high (~50%) and decays to a minimum of 15% as sync count increases.
+        const baselineWeight = Math.max(0.15, 0.5 / (cal.syncCount * 0.5 + 1));
         cal.bGlu = (cal.bGlu * (1 - baselineWeight)) + (val * baselineWeight);
         cal.bInt = (cal.bInt * (1 - baselineWeight)) + (currentRaw * baselineWeight);
         cal.syncCount++;
