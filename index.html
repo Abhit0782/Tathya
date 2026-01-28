@@ -3,6 +3,7 @@
 <head>
     <title>Tathya </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="manifest.json">
     <style>
         :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
@@ -270,8 +271,8 @@
             if (elapsed >= duration) {
                 clearInterval(timer);
                 // Check stability before finishing (Variance Check)
-                const variance = getVariance(buffer);
-                if(variance > 50) { 
+                const variance = getVariance(buffer); 
+                if(variance >= 50) { // Use >= 50 to be consistent with server-side < 50 check
                     alert("Reading Unstable. Please keep finger still and try again.");
                     document.getElementById('scanBtn').disabled = false;
                     updateStatus("FAILED - UNSTABLE", "#f44336");
@@ -347,13 +348,15 @@
         const val = parseFloat(document.getElementById('meterVal').value);
         if(!val || history.length < 1) return alert("Scan first.");
         
-        // Adaptive Learning: Calculate new sensitivity based on this correction
-        const currentRaw = parseFloat(history[0].raw);
+        const lastScan = history[0];
+        const currentRaw = parseFloat(lastScan.raw);
+        const currentNoise = parseFloat(lastScan.noise);
         const prevRaw = cal.bInt;
         const prevGlu = cal.bGlu;
-        
-        // Only adjust slope if there is a significant difference in raw values to avoid noise amplification
-        if (Math.abs(currentRaw - prevRaw) > 5) {
+
+        // Adaptive Learning: Calculate new sensitivity based on this correction
+        // SMART FILTER: Only learn if the signal was stable (low noise) AND it changed significantly.
+        if (Math.abs(currentRaw - prevRaw) > 5 && currentNoise < 50) {
             // New Slope = (RealGlucose - OldGlucose) / (OldIntensity - NewIntensity)
             // Note: Intensity drops as Glucose rises (Absorption)
             const indicatedSens = (val - prevGlu) / (prevRaw - currentRaw);
@@ -364,6 +367,11 @@
                 const learningRate = 1 / (Math.sqrt(cal.syncCount + 1) + 1);
                 cal.sens = (cal.sens * (1 - learningRate)) + (indicatedSens * learningRate);
             }
+        } else if (currentNoise >= 50) {
+            // Inform user why learning didn't happen, but still save the data point.
+            alert("Sync data saved, but learning model not updated: Reading was too unstable.");
+        } else {
+            alert("Sync data saved, but learning model not updated: Change in reading was too small to learn from.");
         }
 
         history[0].actual = val;
@@ -401,8 +409,13 @@
     }
 
     function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
+    
+    // Register Service Worker for PWA
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+    }
+
     window.onload = init;
 </script>
 </body>
 </html>
-
