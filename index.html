@@ -97,7 +97,10 @@
 
     <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
     <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div style="font-size:10px; color:#666; margin-top:5px;">DATABASE SYNC PROGRESS</div>
+    <div style="font-size:10px; color:#666; margin-top:5px; display:flex; justify-content:space-between; width:100%; max-width:400px; align-items:center;">
+        <span>DATABASE SYNC PROGRESS</span>
+        <span id="confidenceStatus" style="font-weight:bold;"></span>
+    </div>
 
     <div class="trend-card">
         <span style="font-size: 11px; color: var(--blue); font-weight: bold;">GLUCOSE TREND</span>
@@ -119,7 +122,7 @@
     const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
     const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
-    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [];
+    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
     let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
@@ -137,7 +140,7 @@
             } else {
                 reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
             }
-            updateCalBar(); drawTrend(); renderLog();
+            updateCalBar(); updateConfidenceStatus(); drawTrend(); renderLog();
         } catch(e) { alert("Camera Permission Required"); }
     }
 
@@ -230,7 +233,7 @@
                 cal.bInt = cloudData.bInt;
                 cal.bGlu = cloudData.bGlu;
                 localStorage.setItem('tathya_cal', JSON.stringify(cal));
-                updateCalBar();
+                updateCalBar(); updateConfidenceStatus();
                 if (showAlert) {
                     alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
                 }
@@ -246,7 +249,7 @@
     function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         document.getElementById('scanBtn').disabled = true;
-        buffer = []; pulseArr = [];
+        buffer = []; pulseArr = []; greenBuffer = [];
         const start = Date.now(), duration = 45000;
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
@@ -254,16 +257,23 @@
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
             
             ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
+            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
+            for(let i=0; i<pix.length; i+=4) {
+                r += pix[i];
+                g += pix[i+1]; // Capture Green channel for pressure validation
+            }
             let intensity = r / (pix.length/4);
+            let greenInt = g / (pix.length/4);
 
             // Professional Signal Validation
             if(intensity > 250) { updateStatus("SATURATION WARNING", "#f44336"); return; }
             if(intensity < 40) { updateStatus("NO FINGER DETECTED", "#f44336"); return; }
             updateStatus("ACQUIRING SIGNAL...", "#00e676");
             
-            if(elapsed > 5000) buffer.push(intensity);
+            if(elapsed > 5000) {
+                buffer.push(intensity);
+                greenBuffer.push(greenInt);
+            }
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
             drawWave();
             updateBPM();
@@ -326,6 +336,32 @@
     }
 
     function finishAnalysis(variance) {
+        // SCIENTIFIC CHECK 1: Perfusion Index (PI)
+        // Validates that we are seeing actual pulsating blood flow, not just a red finger.
+        // PI = (AC Component / DC Component) * 100
+        const pMax = Math.max(...pulseArr);
+        const pMin = Math.min(...pulseArr);
+        const pAvg = pulseArr.reduce((a,b)=>a+b,0)/pulseArr.length;
+        const PI = ((pMax - pMin) / pAvg) * 100;
+
+        // SCIENTIFIC CHECK 2: Pressure Stability (Green Channel)
+        // Green light is absorbed by blood volume. High variance in Green = User is changing pressure.
+        const greenVar = getVariance(greenBuffer);
+
+        if (PI < 0.1) { // < 0.1% usually means no pulse detected
+            alert("Signal Rejected: Low Perfusion.\nYour hands might be cold or the pulse is too weak.");
+            document.getElementById('scanBtn').disabled = false;
+            updateStatus("FAILED - LOW PI", "#f44336");
+            return;
+        }
+        
+        if (greenVar > 20) { // Threshold for pressure artifacts
+            alert("Signal Rejected: Unstable Pressure.\nPlease do not press harder or softer during the scan.");
+            document.getElementById('scanBtn').disabled = false;
+            updateStatus("FAILED - PRESSURE", "#f44336");
+            return;
+        }
+
         // Robust Statistics: Trimmed Mean (Remove top/bottom 10% outliers)
         buffer.sort((a,b) => a-b);
         const trimCount = Math.floor(buffer.length * 0.1);
@@ -354,31 +390,37 @@
         const prevRaw = cal.bInt;
         const prevGlu = cal.bGlu;
 
+        // --- CONFIDENCE LOCK LOGIC ---
+        const CONFIDENCE_THRESHOLD = 20;
+        let learningRate, baselineWeight;
+
+        if (cal.syncCount >= CONFIDENCE_THRESHOLD) {
+            // MODEL IS MATURE: Lock the learning rates to be very low.
+            // New syncs will only provide minor "nudges" to the stable model.
+            learningRate = 0.05; // Fixed low learning rate
+            baselineWeight = 0.05; // Fixed low baseline update rate
+        } else {
+            // MODEL IS LEARNING: Use adaptive rates.
+            learningRate = 1 / (Math.sqrt(cal.syncCount + 1) + 1);
+            baselineWeight = Math.max(0.15, 0.5 / (cal.syncCount * 0.5 + 1));
+        }
+        // --- END CONFIDENCE LOCK ---
+
         // Adaptive Learning: Calculate new sensitivity based on this correction
         // SMART FILTER: Only learn if the signal was stable (low noise) AND it changed significantly.
         if (Math.abs(currentRaw - prevRaw) > 5 && currentNoise < 50) {
-            // New Slope = (RealGlucose - OldGlucose) / (OldIntensity - NewIntensity)
-            // Note: Intensity drops as Glucose rises (Absorption)
             const indicatedSens = (val - prevGlu) / (prevRaw - currentRaw);
-            
-            // Sanity Check: Sensitivity must be positive and within physics limits
             if (indicatedSens > 0.5 && indicatedSens < 20) {
-                // Weighted Average: Learn slowly to avoid over-correcting from one bad reading
-                const learningRate = 1 / (Math.sqrt(cal.syncCount + 1) + 1);
                 cal.sens = (cal.sens * (1 - learningRate)) + (indicatedSens * learningRate);
             }
         } else if (currentNoise >= 50) {
-            // Inform user why learning didn't happen, but still save the data point.
             alert("Sync data saved, but learning model not updated: Reading was too unstable.");
         } else {
             alert("Sync data saved, but learning model not updated: Change in reading was too small to learn from.");
         }
 
         history[0].actual = val;
-        // SMOOTHED BASELINE: Use a weighted average to prevent drastic jumps from one reading.
-        // ADAPTIVE WEIGHT: Learn aggressively at first, then stabilize.
-        // Weight starts high (~50%) and decays to a minimum of 15% as sync count increases.
-        const baselineWeight = Math.max(0.15, 0.5 / (cal.syncCount * 0.5 + 1));
+        // Update baseline using the calculated weight (either adaptive or locked)
         cal.bGlu = (cal.bGlu * (1 - baselineWeight)) + (val * baselineWeight);
         cal.bInt = (cal.bInt * (1 - baselineWeight)) + (currentRaw * baselineWeight);
         cal.syncCount++;
@@ -386,7 +428,7 @@
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         // Send the learned correction (sens) to the database so it can be retrieved on next load
         pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, noise: history[0].noise, type: "SYNC" });
-        updateCalBar(); renderLog(); alert("Global Sync Complete.");
+        updateCalBar(); updateConfidenceStatus(); renderLog(); alert("Global Sync Complete.");
     }
 
     function pushToCloud(data) {
@@ -398,6 +440,20 @@
         const count = cal.syncCount || 0;
         document.getElementById('calBar').style.width = Math.min((count/10)*100, 100) + "%";
         document.getElementById('calBar').style.background = count < 3 ? "#f44336" : (count < 7 ? "#ffa000" : "#00e676");
+    }
+
+    function updateConfidenceStatus() {
+        const CONFIDENCE_THRESHOLD = 20;
+        const statusEl = document.getElementById('confidenceStatus');
+        if (!statusEl) return; // Guard clause
+
+        if (cal.syncCount >= CONFIDENCE_THRESHOLD) {
+            statusEl.innerText = "🔒 MODEL LOCKED";
+            statusEl.style.color = "var(--accent)"; // Green
+        } else {
+            statusEl.innerText = "🧠 LEARNING...";
+            statusEl.style.color = "#ffa000"; // Orange
+        }
     }
 
     function drawTrend() {
