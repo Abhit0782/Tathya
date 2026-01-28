@@ -74,6 +74,21 @@
 
     <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
     
+    <div style="margin: 10px 0;">
+        <select id="fingerSelector" onchange="changeFinger()" style="background: #111; color: #fff; padding: 8px; border-radius: 8px; border: 1px solid #333; width: 200px; text-align: center; font-weight: bold;">
+            <option value="Left Thumb">Left Thumb</option>
+            <option value="Left Index" selected>Left Index</option>
+            <option value="Left Middle">Left Middle</option>
+            <option value="Left Ring">Left Ring</option>
+            <option value="Left Pinky">Left Pinky</option>
+            <option value="Right Thumb">Right Thumb</option>
+            <option value="Right Index">Right Index</option>
+            <option value="Right Middle">Right Middle</option>
+            <option value="Right Ring">Right Ring</option>
+            <option value="Right Pinky">Right Pinky</option>
+        </select>
+    </div>
+
     <div class="bio-ring-container">
         <svg class="progress-ring" width="280" height="280">
             <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
@@ -123,7 +138,9 @@
     const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
-    let cal = JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
+    let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
+    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";
+    let cal = fingerProfiles[currentFinger] || JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
     
@@ -140,6 +157,14 @@
             } else {
                 reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
             }
+            
+            // Initialize Finger UI
+            document.getElementById('fingerSelector').value = currentFinger;
+            if (!fingerProfiles[currentFinger]) {
+                // If this finger has no profile, init it with current cal or default
+                fingerProfiles[currentFinger] = cal;
+            }
+            
             updateUI(); drawTrend(); renderLog();
         } catch(e) { alert("Camera Permission Required"); }
     }
@@ -166,6 +191,26 @@
     function toggleLens() {
         cameraIdx = (cameraIdx + 1) % devices.length;
         setupCamera();
+    }
+
+    function changeFinger() {
+        // Save current profile before switching
+        fingerProfiles[currentFinger] = cal;
+        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
+        
+        // Switch to new finger
+        currentFinger = document.getElementById('fingerSelector').value;
+        localStorage.setItem('tathya_current_finger', currentFinger);
+        
+        // Load new profile (or create default if not exists)
+        if (!fingerProfiles[currentFinger]) {
+            fingerProfiles[currentFinger] = { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
+        }
+        cal = fingerProfiles[currentFinger];
+        
+        // Update Global Cal for backward compatibility
+        localStorage.setItem('tathya_cal', JSON.stringify(cal));
+        updateUI();
     }
 
     function startEnrollStep() {
@@ -233,7 +278,7 @@
                 cal.bInt = cloudData.bInt;
                 cal.bGlu = cloudData.bGlu;
                 cal.finalAccuracyPercent = cloudData.finalAccuracyPercent || 0;
-                localStorage.setItem('tathya_cal', JSON.stringify(cal));
+                saveCal(); // Save to both global and finger profile
                 updateUI();
                 if (showAlert) {
                     alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
@@ -380,7 +425,7 @@
         document.getElementById('gluResult').innerText = result;
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN" };
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -433,7 +478,9 @@
         } else if (currentNoise >= 50) {
             alert("Sync data saved, but learning model not updated: Reading was too unstable.");
         } else {
-            alert("Sync data saved, but learning model not updated: Change in reading was too small to learn from.");
+            // FIX: Removed annoying alert. 
+            // Even if slope isn't updated, the baseline IS updated below, which is sufficient for small corrections.
+            console.log("Small change: Baseline updated, Sensitivity held.");
         }
 
         history[0].actual = val;
@@ -452,11 +499,17 @@
         const currentAvg = cal.finalAccuracyPercent || 0;
         cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
         
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
+        saveCal(); // Save to both global and finger profile
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         // Send the learned correction (sens) to the database so it can be retrieved on next load
-        pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, noise: history[0].noise, type: "SYNC" });
+        pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, noise: history[0].noise, type: "SYNC", finger: currentFinger });
         updateUI(); renderLog(); alert("Global Sync Complete.");
+    }
+
+    function saveCal() {
+        fingerProfiles[currentFinger] = cal;
+        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
+        localStorage.setItem('tathya_cal', JSON.stringify(cal));
     }
 
     function pushToCloud(data) {
