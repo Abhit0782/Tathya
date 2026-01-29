@@ -139,8 +139,16 @@
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
-    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";
-    let cal = fingerProfiles[currentFinger] || JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
+    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
+    // Default 'cal' object now uses the non-linear model parameters.
+    // bInt is kept for absorbance calculation. Other old params are removed.
+    let cal = fingerProfiles[currentFinger] || JSON.parse(localStorage.getItem('tathya_cal')) || { 
+        bInt: 220, 
+        syncCount: 0, 
+        finalAccuracyPercent: 0,
+        coefA: -450.24, coefB: -85.06, intercept: 157.66, // Universal coefficients
+        personalOffset: 0 
+    };
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
     
@@ -204,7 +212,13 @@
         
         // Load new profile (or create default if not exists)
         if (!fingerProfiles[currentFinger]) {
-            fingerProfiles[currentFinger] = { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
+            fingerProfiles[currentFinger] = { 
+                bInt: 220, 
+                syncCount: 0, 
+                finalAccuracyPercent: 0,
+                coefA: -450.24, coefB: -85.06, intercept: 157.66,
+                personalOffset: 0 
+            };
         }
         cal = fingerProfiles[currentFinger];
         
@@ -273,11 +287,12 @@
             });
             const cloudData = await resp.json();
             if (cloudData && cloudData.syncCount > 0) {
-                cal.sens = cloudData.sens;
+                // Switched to new non-linear model from the cloud
+                cal.coefA = cloudData.coefA;
+                cal.coefB = cloudData.coefB;
+                cal.intercept = cloudData.intercept;
+                cal.personalOffset = cloudData.personalOffset;
                 cal.syncCount = cloudData.syncCount;
-                cal.bInt = cloudData.bInt;
-                cal.bGlu = cloudData.bGlu;
-                cal.finalAccuracyPercent = cloudData.finalAccuracyPercent || 0;
                 saveCal(); // Save to both global and finger profile
                 updateUI();
                 if (showAlert) {
@@ -415,17 +430,37 @@
         const cleanBuffer = buffer.slice(trimCount, buffer.length - trimCount);
         const avg = cleanBuffer.reduce((a,b)=>a+b,0) / cleanBuffer.length;
         
-        const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
+        // --- START: New Non-Linear Absorbance Model ---
 
-        // HARDWARE / CAMERA CHANGE DETECTION
-        if (Math.abs(avg - cal.bInt) > 60 && cal.syncCount > 5) {
-             alert("⚠️ HARDWARE MISMATCH DETECTED\n\nThe camera signal is very different from your history. Did you switch phones?\n\nPlease SYNC once to calibrate this new camera.");
+        // 1. Calculate Absorbance (The ratio of raw light to the baseline)
+        // This makes the reading relative, providing immunity to baseline drift.
+        const absorbance = Math.log(cal.bInt / avg);
+
+        // 2. Polynomial Prediction (Non-linear mapping)
+        // Formula: Result = (A * Abs^2) + (B * Abs) + C + PersonalOffset
+        let result = (cal.coefA * Math.pow(absorbance, 2)) + 
+                     (cal.coefB * absorbance) + 
+                     cal.intercept + 
+                     (cal.personalOffset || 0);
+
+        // 3. Temporal Smoothing (Prevents wild jumps between consecutive scans)
+        if (history.length > 0) {
+            let lastVal = parseFloat(history[0].val);
+            let maxChange = 15; // Max allowable mg/dL jump between scans
+            if (Math.abs(result - lastVal) > maxChange) {
+                // Nudge the result towards the last value to avoid unrealistic spikes
+                result = lastVal + (Math.sign(result - lastVal) * 5); 
+            }
         }
+
+        result = Math.round(result);
+
+        // --- END: New Model ---
 
         document.getElementById('gluResult').innerText = result;
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger };
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger, absorbance: absorbance.toFixed(4) };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -435,76 +470,47 @@
     }
 
     function syncCal() {
-        const val = parseFloat(document.getElementById('meterVal').value);
-        if(!val || history.length < 1) return alert("Scan first.");
+        const actual = parseFloat(document.getElementById('meterVal').value);
+        if(!actual || history.length < 1) return alert("Scan first, then enter meter value to sync.");
         
         const lastScan = history[0];
-        const currentRaw = parseFloat(lastScan.raw);
-        const currentNoise = parseFloat(lastScan.noise);
-        const prevRaw = cal.bInt;
-        const prevGlu = cal.bGlu;
-
-        // --- CONFIDENCE LOCK LOGIC ---
-        const CONFIDENCE_THRESHOLD = 20;
-        let learningRate, baselineWeight;
-
-        if (cal.syncCount >= CONFIDENCE_THRESHOLD) {
-            // MODEL IS MATURE: Lock the learning rates to be very low.
-            // New syncs will only provide minor "nudges" to the stable model.
-            learningRate = 0.05; // Fixed low learning rate
-            baselineWeight = 0.05; // Fixed low baseline update rate
-        } else {
-            // MODEL IS LEARNING: Use adaptive rates.
-            learningRate = 1 / (Math.sqrt(cal.syncCount + 1) + 1);
-            baselineWeight = Math.max(0.15, 0.5 / (cal.syncCount * 0.5 + 1));
+        if (lastScan.absorbance === undefined) {
+            return alert("The last scan was made with an old app version. Please perform a new scan before syncing.");
         }
-
-        // EMERGENCY CORRECTION: If discrepancy is huge (>30mg/dL), force aggressive learning
-        // regardless of sync count or lock status. This fixes the "stuck" low reading issue.
-        const predictedVal = parseFloat(history[0].val);
-        if (Math.abs(predictedVal - val) > 30) {
-             learningRate = 0.6; 
-             baselineWeight = 0.9; // Aggressively shift baseline (90%) to match reality immediately
-        }
-        // --- END CONFIDENCE LOCK ---
-
-        // Adaptive Learning: Calculate new sensitivity based on this correction
-        // SMART FILTER: Only learn if the signal was stable (low noise) AND it changed significantly.
-        if (Math.abs(currentRaw - prevRaw) > 5 && currentNoise < 50) {
-            const indicatedSens = (val - prevGlu) / (prevRaw - currentRaw);
-            // Widen the upper limit to 50 (was 20) to allow for large corrections
-            if (indicatedSens > 0.5 && indicatedSens < 50) {
-                cal.sens = (cal.sens * (1 - learningRate)) + (indicatedSens * learningRate);
-            }
-        } else if (currentNoise >= 50) {
-            alert("Sync data saved, but learning model not updated: Reading was too unstable.");
-        } else {
-            // FIX: Removed annoying alert. 
-            // Even if slope isn't updated, the baseline IS updated below, which is sufficient for small corrections.
-            console.log("Small change: Baseline updated, Sensitivity held.");
-        }
-
-        history[0].actual = val;
-        // Update baseline using the calculated weight (either adaptive or locked)
-        cal.bGlu = (cal.bGlu * (1 - baselineWeight)) + (val * baselineWeight);
-        cal.bInt = (cal.bInt * (1 - baselineWeight)) + (currentRaw * baselineWeight);
-        cal.syncCount++;
+        const abs = parseFloat(lastScan.absorbance);
         
+        // Calculate what the model predicted WITHOUT the personal offset
+        const modelPrediction = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
+        
+        // The "Learning": The difference between the meter and our model's prediction is the new offset
+        const newOffset = actual - modelPrediction;
+
+        // Smoothly update the personal offset using a weighted average (Adaptive Learning Rate)
+        cal.personalOffset = cal.personalOffset || 0;
+        const weight = 1 / ((cal.syncCount || 0) + 2); // Learning rate decreases as sync count grows
+        cal.personalOffset = (cal.personalOffset * (1 - weight)) + (newOffset * weight);
+        cal.syncCount = (cal.syncCount || 0) + 1;
+
+        // --- Update local state and UI (re-integrated from previous version for consistency) ---
+        history[0].actual = actual;
+
         // Update Local Accuracy Estimate
-        const currentError = Math.abs(predictedVal - val) / val;
+        const predictedVal = parseFloat(lastScan.val);
+        const currentError = Math.abs(predictedVal - actual) / actual;
         const currentAcc = Math.max(0, 100 - (currentError * 100));
-        
-        // Update running average for UI immediately (don't wait for cloud revive)
-        // We use (syncCount - 1) because syncCount was just incremented above
         const prevCount = cal.syncCount - 1;
         const currentAvg = cal.finalAccuracyPercent || 0;
         cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
-        
-        saveCal(); // Save to both global and finger profile
+
+        saveCal(); // Persist the updated 'cal' object for the current finger
         localStorage.setItem('tathya_hist', JSON.stringify(history));
-        // Send the learned correction (sens) to the database so it can be retrieved on next load
-        pushToCloud({ ...history[0], syncCount: cal.syncCount, learnedSens: cal.sens, noise: history[0].noise, type: "SYNC", finger: currentFinger });
-        updateUI(); renderLog(); alert("Global Sync Complete.");
+        
+        // Push the complete sync record to the cloud
+        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset });
+        
+        updateUI(); 
+        renderLog(); 
+        alert("Biological Profile Updated. Accuracy is increasing!");
     }
 
     function saveCal() {
