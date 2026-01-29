@@ -138,7 +138,6 @@
     const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
-    let stabilizationResults = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";
     let cal = fingerProfiles[currentFinger] || JSON.parse(localStorage.getItem('tathya_cal')) || { bInt: 220, bGlu: 100, sens: 5.5, syncCount: 0, accuracy: 0 };
@@ -296,9 +295,9 @@
     function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         document.getElementById('scanBtn').disabled = true;
-        document.getElementById('scanBtn').innerText = "ANALYZING...";
+        // Reverted to single, longer scan for better stability
         buffer = []; pulseArr = []; greenBuffer = [];
-        const start = Date.now(), duration = 15000; // Shorter scan for stabilization
+        const start = Date.now(), duration = 45000; 
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
@@ -416,52 +415,23 @@
         const cleanBuffer = buffer.slice(trimCount, buffer.length - trimCount);
         const avg = cleanBuffer.reduce((a,b)=>a+b,0) / cleanBuffer.length;
         
-        const currentResult = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
+        const result = Math.round(cal.bGlu + (cal.bInt - avg) * cal.sens);
 
-        // --- SCAN STABILIZATION LOGIC ---
-        const STABILITY_TOLERANCE = 0.10; // 10% tolerance between scans
-
-        if (stabilizationResults.length === 0) {
-            // This is the first scan in a sequence.
-            stabilizationResults.push({ result: currentResult, raw: avg, noise: variance });
-            document.getElementById('gluResult').innerText = currentResult;
-            updateStatus("PRELIMINARY. SCAN AGAIN TO CONFIRM.", "#ffa000");
-            document.getElementById('timer').innerText = "CONFIRM";
-            document.getElementById('scanBtn').innerText = "CONFIRM SCAN";
-            document.getElementById('scanBtn').disabled = false;
-        } else {
-            // This is a confirmation scan.
-            const previousScan = stabilizationResults[0];
-            const difference = Math.abs(currentResult - previousScan.result);
-            const tolerance = previousScan.result * STABILITY_TOLERANCE;
-
-            if (difference <= tolerance) {
-                // STABLE! We have a high-confidence reading.
-                const finalResult = Math.round((currentResult + previousScan.result) / 2);
-
-                document.getElementById('gluResult').innerText = finalResult;
-                document.getElementById('timer').innerText = "DONE";
-                updateStatus("ANALYSIS COMPLETE", "#2196f3");
-                
-                // Use the latest scan's data for the log, but with the averaged final result
-                const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalResult, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger };
-                history.unshift(logEntry); if(history.length > 10) history.pop();
-                localStorage.setItem('tathya_hist', JSON.stringify(history));
-                pushToCloud(logEntry);
-                renderLog(); drawTrend(); 
-                document.getElementById('scanBtn').disabled = false;
-                document.getElementById('scanBtn').innerText = "START BIO-SCAN";
-                stabilizationResults = []; // Reset for next time
-            } else {
-                // NOT STABLE. Discard the old scan and keep this new one.
-                stabilizationResults[0] = { result: currentResult, raw: avg, noise: variance };
-                document.getElementById('gluResult').innerText = currentResult;
-                updateStatus("INCONSISTENT. SCAN AGAIN.", "#f44336");
-                document.getElementById('timer').innerText = "RE-SCAN";
-                document.getElementById('scanBtn').innerText = "CONFIRM SCAN";
-                document.getElementById('scanBtn').disabled = false;
-            }
+        // HARDWARE / CAMERA CHANGE DETECTION
+        if (Math.abs(avg - cal.bInt) > 60 && cal.syncCount > 5) {
+             alert("⚠️ HARDWARE MISMATCH DETECTED\n\nThe camera signal is very different from your history. Did you switch phones?\n\nPlease SYNC once to calibrate this new camera.");
         }
+
+        document.getElementById('gluResult').innerText = result;
+        document.getElementById('timer').innerText = "DONE";
+        updateStatus("ANALYSIS COMPLETE", "#2196f3");
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger };
+        history.unshift(logEntry); if(history.length > 10) history.pop();
+        localStorage.setItem('tathya_hist', JSON.stringify(history));
+        pushToCloud(logEntry);
+        renderLog(); drawTrend(); 
+        document.getElementById('scanBtn').disabled = false;
+        document.getElementById('scanBtn').innerText = "START BIO-SCAN";
     }
 
     function syncCal() {
