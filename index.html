@@ -128,6 +128,7 @@
     </div>
 
     <div id="historyLog" class="card"></div>
+    <button onclick="hardReset()" style="margin-top:20px; background:transparent; border:1px solid #333; color:#555; padding:10px; border-radius:8px; font-size:10px;">FACTORY RESET APP</button>
     <canvas id="c" width="50" height="50" style="display:none;"></canvas>
 
 <script>
@@ -437,7 +438,7 @@
         buffer.sort((a,b) => a-b);
         const trimCount = Math.floor(buffer.length * 0.1);
         const cleanBuffer = buffer.slice(trimCount, buffer.length - trimCount);
-        const avg = cleanBuffer.reduce((a,b)=>a+b,0) / cleanBuffer.length;
+        const avg = Math.max(0.1, cleanBuffer.reduce((a,b)=>a+b,0) / cleanBuffer.length);
         
         // --- START: New Non-Linear Absorbance Model ---
 
@@ -465,7 +466,7 @@
             }
         }
 
-        if (isNaN(result)) {
+        if (!isFinite(result) || isNaN(result)) {
             result = 0; // Prevent NaN propagation
         }
 
@@ -558,6 +559,18 @@
         } else {
             syncCard.style.display = "block";
             document.getElementById('statusMsg').innerText = "🧠 LEARNING: " + (95 - accuracy).toFixed(1) + "% to go";
+        }
+    }
+
+    function hardReset() {
+        if(confirm("This will wipe all data and reset the app. Continue?")) {
+            localStorage.clear();
+            if('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    for(let registration of registrations) { registration.unregister(); }
+                });
+            }
+            location.reload();
         }
     }
 
