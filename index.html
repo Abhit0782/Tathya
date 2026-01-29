@@ -153,7 +153,9 @@
     function sanitizeCal(c) {
         if (!c) return null;
         // Inject missing coefficients if migrating from old version
-        if (c.coefA === undefined) { c.coefA = defaultCal.coefA; c.coefB = defaultCal.coefB; c.intercept = defaultCal.intercept; c.personalOffset = 0; }
+        if (c.coefA == null || isNaN(c.coefA)) c.coefA = defaultCal.coefA;
+        if (c.coefB == null || isNaN(c.coefB)) c.coefB = defaultCal.coefB;
+        if (c.intercept == null || isNaN(c.intercept)) c.intercept = defaultCal.intercept;
         // Fix NaN corruption
         if (isNaN(c.personalOffset)) c.personalOffset = 0;
         if (isNaN(c.bInt) || c.bInt <= 0) c.bInt = 220;
@@ -439,9 +441,12 @@
         
         // --- START: New Non-Linear Absorbance Model ---
 
+        // NEW SAFETY LOGIC: Use safe default if baseline is missing/invalid to prevent NaN
+        let currentBaseline = (cal.bInt && cal.bInt > 0) ? cal.bInt : 220;
+
         // 1. Calculate Absorbance (The ratio of raw light to the baseline)
         // This makes the reading relative, providing immunity to baseline drift.
-        const absorbance = Math.log(cal.bInt / avg);
+        const absorbance = Math.log(currentBaseline / avg);
 
         // 2. Polynomial Prediction (Non-linear mapping)
         // Formula: Result = (A * Abs^2) + (B * Abs) + C + PersonalOffset
@@ -458,6 +463,10 @@
                 // Nudge the result towards the last value to avoid unrealistic spikes
                 result = lastVal + (Math.sign(result - lastVal) * 5); 
             }
+        }
+
+        if (isNaN(result)) {
+            result = 0; // Prevent NaN propagation
         }
 
         result = Math.round(result);
@@ -485,6 +494,7 @@
             return alert("The last scan was made with an old app version. Please perform a new scan before syncing.");
         }
         const abs = parseFloat(lastScan.absorbance);
+        if (isNaN(abs)) return alert("Invalid scan data. Please rescan.");
         
         // Calculate what the model predicted WITHOUT the personal offset
         const modelPrediction = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
