@@ -140,15 +140,27 @@
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
-    // Default 'cal' object now uses the non-linear model parameters.
-    // bInt is kept for absorbance calculation. Other old params are removed.
-    let cal = fingerProfiles[currentFinger] || JSON.parse(localStorage.getItem('tathya_cal')) || { 
+    
+    const defaultCal = { 
         bInt: 220, 
         syncCount: 0, 
         finalAccuracyPercent: 0,
         coefA: -450.24, coefB: -85.06, intercept: 157.66, // Universal coefficients
         personalOffset: 0 
     };
+
+    // Helper to sanitize calibration data (Fixes NaN and migrates old profiles)
+    function sanitizeCal(c) {
+        if (!c) return null;
+        // Inject missing coefficients if migrating from old version
+        if (c.coefA === undefined) { c.coefA = defaultCal.coefA; c.coefB = defaultCal.coefB; c.intercept = defaultCal.intercept; c.personalOffset = 0; }
+        // Fix NaN corruption
+        if (isNaN(c.personalOffset)) c.personalOffset = 0;
+        if (isNaN(c.bInt) || c.bInt <= 0) c.bInt = 220;
+        return c;
+    }
+
+    let cal = sanitizeCal(fingerProfiles[currentFinger]) || sanitizeCal(JSON.parse(localStorage.getItem('tathya_cal'))) || JSON.parse(JSON.stringify(defaultCal));
     let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
     let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
     
@@ -212,15 +224,9 @@
         
         // Load new profile (or create default if not exists)
         if (!fingerProfiles[currentFinger]) {
-            fingerProfiles[currentFinger] = { 
-                bInt: 220, 
-                syncCount: 0, 
-                finalAccuracyPercent: 0,
-                coefA: -450.24, coefB: -85.06, intercept: 157.66,
-                personalOffset: 0 
-            };
+            fingerProfiles[currentFinger] = JSON.parse(JSON.stringify(defaultCal));
         }
-        cal = fingerProfiles[currentFinger];
+        cal = sanitizeCal(fingerProfiles[currentFinger]);
         
         // Update Global Cal for backward compatibility
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
@@ -293,6 +299,7 @@
                 cal.intercept = cloudData.intercept;
                 cal.personalOffset = cloudData.personalOffset;
                 cal.syncCount = cloudData.syncCount;
+                cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
                 saveCal(); // Save to both global and finger profile
                 updateUI();
                 if (showAlert) {
