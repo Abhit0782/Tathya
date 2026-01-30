@@ -225,6 +225,7 @@
         // Switch to new finger
         currentFinger = document.getElementById('fingerSelector').value;
         localStorage.setItem('tathya_current_finger', currentFinger);
+        sessionBuffer = []; // Reset batch logic when changing fingers
         
         // Load new profile (or create default if not exists)
         if (!fingerProfiles[currentFinger]) {
@@ -370,10 +371,11 @@
                 clearInterval(timer);
                 // Check stability before finishing (Variance Check)
                 const variance = getVariance(buffer); 
-                if(variance >= 100) { // Relaxed variance for short scan
-                    alert("Reading Unstable. Please keep finger still and try again.");
+                // FIX: Allow higher variance for warmup scans so user doesn't get stuck
+                if(variance >= 300) { 
+                    alert("Reading Extremely Unstable. Please keep finger still.");
                     document.getElementById('scanBtn').disabled = false;
-                    updateStatus("FAILED - UNSTABLE", "#f44336");
+                    updateStatus("FAILED - TOO SHAKY", "#f44336");
                 } else if (buffer.length < 30) {
                     alert("Insufficient Data. Ensure finger covers lens.");
                     document.getElementById('scanBtn').disabled = false;
@@ -437,14 +439,14 @@
         const greenVar = getVariance(greenBuffer);
 
         if (PI < 0.1) { // < 0.1% usually means no pulse detected
-            alert("Signal Rejected: Low Perfusion.\nYour hands might be cold or the pulse is too weak.");
+            alert("Signal Weak. Adjust finger pressure.");
             document.getElementById('scanBtn').disabled = false;
             updateStatus("FAILED - LOW PI", "#f44336");
             return;
         }
         
-        if (greenVar > 20) { // Threshold for pressure artifacts
-            alert("Signal Rejected: Unstable Pressure.\nPlease do not press harder or softer during the scan.");
+        if (greenVar > 50) { // Relaxed threshold for batch mode
+            alert("Unstable Pressure. Keep finger steady.");
             document.getElementById('scanBtn').disabled = false;
             updateStatus("FAILED - PRESSURE", "#f44336");
             return;
@@ -503,7 +505,6 @@
         sessionBuffer.push({ val: result, raw: avg, abs: absorbance, var: variance });
         const count = sessionBuffer.length;
 
-        document.getElementById('gluResult').innerText = result;
         if (count < 5) {
             document.getElementById('gluResult').innerText = result;
             document.getElementById('timer').innerText = `SCAN ${count}/5`;
@@ -513,7 +514,7 @@
             
             updateStatus(msg, "#ffa000");
             document.getElementById('scanBtn').disabled = false;
-            document.getElementById('scanBtn').innerText = `CONTINUE (${count+1}/5)`;
+            document.getElementById('scanBtn').innerText = `CONTINUE SCAN (${count+1}/5)`;
             
             alert(`Warmup Scan ${count}/5 Complete.\nResult: ${result}\n\nNote: First 2-3 scans are for sensor warmup. Results improve significantly from scan 4.`);
             return; // Do not save to DB yet
