@@ -459,10 +459,13 @@
         // 3. Temporal Smoothing (Prevents wild jumps between consecutive scans)
         if (history.length > 0) {
             let lastVal = parseFloat(history[0].val);
-            let maxChange = 15; // Max allowable mg/dL jump between scans
-            if (Math.abs(result - lastVal) > maxChange) {
-                // Nudge the result towards the last value to avoid unrealistic spikes
-                result = lastVal + (Math.sign(result - lastVal) * 5); 
+            // Only smooth if the previous value was a valid physiological reading (> 40)
+            if (lastVal > 40) {
+                let maxChange = 15; // Max allowable mg/dL jump between scans
+                if (Math.abs(result - lastVal) > maxChange) {
+                    // Nudge the result towards the last value to avoid unrealistic spikes
+                    result = lastVal + (Math.sign(result - lastVal) * 5); 
+                }
             }
         }
 
