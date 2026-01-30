@@ -140,6 +140,7 @@
     
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
+    let sessionBuffer = []; // Stores scans for "Best of 5" logic
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
     
     const defaultCal = { 
@@ -337,7 +338,7 @@
         }
 
         buffer = []; pulseArr = []; greenBuffer = [];
-        const start = Date.now(), duration = 5000; // 5-Second Smart Scan
+        const start = Date.now(), duration = 10000; // 10-Second Smart Scan
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
@@ -357,7 +358,7 @@
             if(intensity < 40) { updateStatus("NO FINGER DETECTED", "#f44336"); return; }
             updateStatus("ACQUIRING SIGNAL...", "#00e676");
             
-            if(elapsed > 500) { // Skip first 0.5s for exposure settling
+            if(elapsed > 1500) { // Skip first 1.5s for exposure settling
                 buffer.push(intensity);
                 greenBuffer.push(greenInt);
             }
@@ -497,11 +498,53 @@
         result = Math.round(result);
 
         // --- END: New Model ---
+        
+        // --- BATCH LOGIC (Best of 5) ---
+        sessionBuffer.push({ val: result, raw: avg, abs: absorbance, var: variance });
+        const count = sessionBuffer.length;
 
         document.getElementById('gluResult').innerText = result;
+        if (count < 5) {
+            document.getElementById('gluResult').innerText = result;
+            document.getElementById('timer').innerText = `SCAN ${count}/5`;
+            
+            let msg = `WARMUP ${count}/5 - SENSOR STABILIZING`;
+            if (count >= 3) msg = `OPTIMIZING ${count}/5 - ALMOST READY`;
+            
+            updateStatus(msg, "#ffa000");
+            document.getElementById('scanBtn').disabled = false;
+            document.getElementById('scanBtn').innerText = `CONTINUE (${count+1}/5)`;
+            
+            alert(`Warmup Scan ${count}/5 Complete.\nResult: ${result}\n\nNote: First 2-3 scans are for sensor warmup. Results improve significantly from scan 4.`);
+            return; // Do not save to DB yet
+        }
+
+        // Calculate Final Result (Average of top 3 most stable scans)
+        sessionBuffer.sort((a,b) => a.var - b.var); // Sort by lowest variance (cleanest signal)
+        const best3 = sessionBuffer.slice(0, 3);
+        
+        // Compute averages from the best 3
+        const finalRaw = best3.reduce((sum, item) => sum + item.raw, 0) / 3;
+        const finalAbs = best3.reduce((sum, item) => sum + item.abs, 0) / 3;
+
+        // RE-ANALYZE with Database Data (Coefficients & Offset)
+        // Applying the model to the averaged absorbance is more accurate than averaging the results
+        let finalVal = (cal.coefA * Math.pow(finalAbs, 2)) + 
+                       (cal.coefB * finalAbs) + 
+                       cal.intercept + 
+                       (cal.personalOffset || 0);
+        
+        finalVal = Math.round(finalVal);
+
+        // Reset for next batch
+        sessionBuffer = [];
+        document.getElementById('scanBtn').innerText = "START SMART SCAN";
+
+        document.getElementById('gluResult').innerText = finalVal;
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: result, raw: avg.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "SCAN", finger: currentFinger, absorbance: absorbance.toFixed(4) };
+        
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4) };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -529,8 +572,6 @@
 
         // Smoothly update the personal offset using a weighted average (Adaptive Learning Rate)
         cal.personalOffset = cal.personalOffset || 0;
-        const weight = 1 / ((cal.syncCount || 0) + 2); // Learning rate decreases as sync count grows
-        cal.personalOffset = (cal.personalOffset * (1 - weight)) + (newOffset * weight);
         // CHANGED: Use fixed learning rate (0.3) so recent data always has 30% impact
         const learningRate = 0.3; 
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
