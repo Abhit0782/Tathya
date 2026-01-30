@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tathya-monitor-v4'; // Update version
+const CACHE_NAME = 'tathya-monitor-v5'; // Update version
 const urlsToCache = [
   './',
   'index.html',
