@@ -325,8 +325,14 @@
         if (stream) {
             const track = stream.getVideoTracks()[0];
             const caps = track.getCapabilities();
-            if (caps.exposureCompensation) {
-                try { await track.applyConstraints({ advanced: [{ exposureCompensation: caps.exposureCompensation.min }] }); } catch(e) {}
+            const constraints = [];
+
+            // FIX: Force ISO (Sensitivity) to minimum to prevent white-out/saturation
+            if (caps.iso) constraints.push({ iso: caps.iso.min });
+            if (caps.exposureCompensation) constraints.push({ exposureCompensation: caps.exposureCompensation.min });
+            
+            if (constraints.length > 0) {
+                try { await track.applyConstraints({ advanced: constraints }); } catch(e) { console.warn("Exposure update failed", e); }
             }
         }
 
@@ -347,7 +353,7 @@
             let greenInt = g / (pix.length/4);
 
             // Professional Signal Validation
-            if(intensity > 250) { updateStatus("SATURATION WARNING", "#f44336"); return; }
+            if(intensity > 250) { updateStatus("TOO BRIGHT - ADJUST FINGER", "#f44336"); return; }
             if(intensity < 40) { updateStatus("NO FINGER DETECTED", "#f44336"); return; }
             updateStatus("ACQUIRING SIGNAL...", "#00e676");
             
