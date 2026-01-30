@@ -110,7 +110,7 @@
         <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
     </div>
 
-    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START BIO-SCAN</button>
+    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START SMART SCAN</button>
     <div class="cal-bar-container"><div id="calBar"></div></div>
     <div style="font-size:10px; color:#666; margin-top:5px; display:flex; justify-content:space-between; width:100%; max-width:400px; align-items:center;">
         <span id="calText">DATABASE SYNC PROGRESS</span>
@@ -146,7 +146,7 @@
         bInt: 220, 
         syncCount: 0, 
         finalAccuracyPercent: 0,
-        coefA: -450.24, coefB: -85.06, intercept: 157.66, // Universal coefficients
+        coefA: 88.38, coefB: -84.54, intercept: 154.21, // Jan 30th Coefficients
         personalOffset: 0 
     };
 
@@ -317,12 +317,21 @@
         }
     }
 
-    function runAnalysis() {
+    async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         document.getElementById('scanBtn').disabled = true;
-        // Reverted to single, longer scan for better stability
+        
+        // 1. Hardware Auto-Adjustment (Prevent Saturation)
+        if (stream) {
+            const track = stream.getVideoTracks()[0];
+            const caps = track.getCapabilities();
+            if (caps.exposureCompensation) {
+                try { await track.applyConstraints({ advanced: [{ exposureCompensation: caps.exposureCompensation.min }] }); } catch(e) {}
+            }
+        }
+
         buffer = []; pulseArr = []; greenBuffer = [];
-        const start = Date.now(), duration = 45000; 
+        const start = Date.now(), duration = 5000; // 5-Second Smart Scan
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
@@ -342,7 +351,7 @@
             if(intensity < 40) { updateStatus("NO FINGER DETECTED", "#f44336"); return; }
             updateStatus("ACQUIRING SIGNAL...", "#00e676");
             
-            if(elapsed > 5000) {
+            if(elapsed > 500) { // Skip first 0.5s for exposure settling
                 buffer.push(intensity);
                 greenBuffer.push(greenInt);
             }
@@ -354,11 +363,11 @@
                 clearInterval(timer);
                 // Check stability before finishing (Variance Check)
                 const variance = getVariance(buffer); 
-                if(variance >= 50) { // Use >= 50 to be consistent with server-side < 50 check
+                if(variance >= 100) { // Relaxed variance for short scan
                     alert("Reading Unstable. Please keep finger still and try again.");
                     document.getElementById('scanBtn').disabled = false;
                     updateStatus("FAILED - UNSTABLE", "#f44336");
-                } else if (buffer.length < 50) {
+                } else if (buffer.length < 30) {
                     alert("Insufficient Data. Ensure finger covers lens.");
                     document.getElementById('scanBtn').disabled = false;
                     updateStatus("FAILED - NO DATA", "#f44336");
@@ -434,11 +443,15 @@
             return;
         }
 
-        // Robust Statistics: Trimmed Mean (Remove top/bottom 10% outliers)
-        buffer.sort((a,b) => a-b);
-        const trimCount = Math.floor(buffer.length * 0.1);
-        const cleanBuffer = buffer.slice(trimCount, buffer.length - trimCount);
-        const avg = Math.max(0.1, cleanBuffer.reduce((a,b)=>a+b,0) / cleanBuffer.length);
+        // 3. PPG Gating (Diastolic Peak Detection)
+        // We look for local maximums in intensity (where blood volume is lowest)
+        let peaks = buffer.filter((val, i, arr) => {
+            return i > 0 && i < arr.length - 1 && val > arr[i-1] && val > arr[i+1];
+        });
+
+        if (peaks.length === 0) peaks = buffer; // Fallback if no pulse detected
+        
+        const avg = peaks.reduce((a, b) => a + b, 0) / peaks.length;
         
         // --- START: New Non-Linear Absorbance Model ---
 
@@ -457,6 +470,7 @@
                      (cal.personalOffset || 0);
 
         // 3. Temporal Smoothing (Prevents wild jumps between consecutive scans)
+        /* DISABLED TO FIX "STUCK" READINGS - ALLOWS FASTER RESPONSE
         if (history.length > 0) {
             let lastVal = parseFloat(history[0].val);
             // Only smooth if the previous value was a valid physiological reading (> 40)
@@ -468,6 +482,7 @@
                 }
             }
         }
+        */
 
         if (!isFinite(result) || isNaN(result)) {
             result = 0; // Prevent NaN propagation
@@ -486,7 +501,7 @@
         pushToCloud(logEntry);
         renderLog(); drawTrend(); 
         document.getElementById('scanBtn').disabled = false;
-        document.getElementById('scanBtn').innerText = "START BIO-SCAN";
+        document.getElementById('scanBtn').innerText = "START SMART SCAN";
     }
 
     function syncCal() {
@@ -510,6 +525,9 @@
         cal.personalOffset = cal.personalOffset || 0;
         const weight = 1 / ((cal.syncCount || 0) + 2); // Learning rate decreases as sync count grows
         cal.personalOffset = (cal.personalOffset * (1 - weight)) + (newOffset * weight);
+        // CHANGED: Use fixed learning rate (0.3) so recent data always has 30% impact
+        const learningRate = 0.3; 
+        cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
 
         // --- Update local state and UI (re-integrated from previous version for consistency) ---
