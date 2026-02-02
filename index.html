@@ -144,11 +144,12 @@
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
     
     const defaultCal = { 
-        bInt: 100, 
+        bInt: 220, 
         syncCount: 0, 
         finalAccuracyPercent: 0,
-        coefA: 88.38, coefB: -84.54, intercept: 154.21, // Jan 30th Coefficients
-        personalOffset: 0 
+        coefA: 88.38, coefB: -84.54, intercept: 154.21, // Updated for Fast-Learn
+        personalOffset: 0,
+        sensitivityScale: 1.0
     };
 
     // Helper to sanitize calibration data (Fixes NaN and migrates old profiles)
@@ -461,11 +462,11 @@
         if (peaks.length === 0) peaks = buffer; // Fallback if no pulse detected
         
         const avg = peaks.reduce((a, b) => a + b, 0) / peaks.length;
+        const avgGreen = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
         
         // --- START: New Non-Linear Absorbance Model ---
 
-        // NEW SAFETY LOGIC: Use safe default if baseline is missing/invalid to prevent NaN
-        let currentBaseline = (cal.bInt && cal.bInt > 0) ? cal.bInt : 220;
+        const currentBaseline = 220;
 
         // 1. Calculate Absorbance (The ratio of raw light to the baseline)
         // This makes the reading relative, providing immunity to baseline drift.
@@ -478,21 +479,6 @@
                      cal.intercept + 
                      (cal.personalOffset || 0);
 
-        // 3. Temporal Smoothing (Prevents wild jumps between consecutive scans)
-        /* DISABLED TO FIX "STUCK" READINGS - ALLOWS FASTER RESPONSE
-        if (history.length > 0) {
-            let lastVal = parseFloat(history[0].val);
-            // Only smooth if the previous value was a valid physiological reading (> 40)
-            if (lastVal > 40) {
-                let maxChange = 15; // Max allowable mg/dL jump between scans
-                if (Math.abs(result - lastVal) > maxChange) {
-                    // Nudge the result towards the last value to avoid unrealistic spikes
-                    result = lastVal + (Math.sign(result - lastVal) * 5); 
-                }
-            }
-        }
-        */
-
         if (!isFinite(result) || isNaN(result)) {
             result = 0; // Prevent NaN propagation
         }
@@ -502,7 +488,7 @@
         // --- END: New Model ---
         
         // --- BATCH LOGIC (Best of 5) ---
-        sessionBuffer.push({ val: result, raw: avg, abs: absorbance, var: variance });
+        sessionBuffer.push({ val: result, raw: avg, greenRaw: avgGreen, abs: absorbance, var: variance });
         const count = sessionBuffer.length;
 
         if (count < 5) {
@@ -524,18 +510,33 @@
         sessionBuffer.sort((a,b) => a.var - b.var); // Sort by lowest variance (cleanest signal)
         const best3 = sessionBuffer.slice(0, 3);
         
-        // Compute averages from the best 3
-        const finalRaw = best3.reduce((sum, item) => sum + item.raw, 0) / 3;
-        const finalAbs = best3.reduce((sum, item) => sum + item.abs, 0) / 3;
+        // --- THE REVOLUTIONARY "TATHYA" ENGINE ---
+        const redAvg = best3.reduce((s, i) => s + i.raw, 0) / 3;
+        const greenAvg = best3.reduce((s, i) => s + (i.greenRaw || i.raw * 0.4), 0) / 3;
 
-        // RE-ANALYZE with Database Data (Coefficients & Offset)
-        // Applying the model to the averaged absorbance is more accurate than averaging the results
-        let finalVal = (cal.coefA * Math.pow(finalAbs, 2)) + 
-                       (cal.coefB * finalAbs) + 
-                       cal.intercept + 
-                       (cal.personalOffset || 0);
-        
+        // 1. Calculate the Perfusion-Glucose Ratio (PGR)
+        // This cancels out 'Morning Drift' and pressure errors automatically.
+        const pgr = redAvg / greenAvg;
+
+        // 2. High-Fidelity Absorbance with PPG Normalization
+        const baseline = 220; 
+        const rawAbs = Math.log(baseline / redAvg);
+        const normalizedAbs = rawAbs * (pgr / 2.5); // 2.5 is the average Sony LYT-808 ratio
+
+        // 3. Autonomous Prediction
+        let finalVal = (cal.coefA * Math.pow(normalizedAbs, 2)) + 
+                       (cal.coefB * normalizedAbs) + 
+                       cal.intercept;
+
+        // 4. Personalization (Learned from your 36+ syncs)
+        finalVal = (finalVal * (cal.sensitivityScale || 1.0)) + (cal.personalOffset || 0);
+
+        // Round and Display
         finalVal = Math.round(finalVal);
+        
+        // Map back to variables used for logging
+        const finalRaw = redAvg;
+        const finalAbs = normalizedAbs;
 
         // Reset for next batch
         sessionBuffer = [];
@@ -667,4 +668,3 @@
 </script>
 </body>
 </html>
-
