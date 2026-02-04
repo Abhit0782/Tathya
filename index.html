@@ -173,6 +173,11 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
+        // ... existing camera setup ...
+        if(enrollmentData) {
+            await refreshIntelligence(); // Force check DB on startup
+        }
+
         try {
             const d = await navigator.mediaDevices.enumerateDevices();
             devices = d.filter(i => i.kind === 'videoinput');
@@ -192,6 +197,29 @@
             
             updateUI(); drawTrend(); renderLog();
         } catch(e) { alert("Camera Permission Required"); }
+    }
+
+    // Add this function to fetch intelligence before every scan or on startup
+    async function refreshIntelligence() {
+        if(!enrollmentData) return;
+        try {
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
+                method: 'POST', 
+                headers: { "Content-Type": "text/plain" },
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+            });
+            const cloudBrain = await resp.json();
+            
+            // Overwrite local calibration with DB truth
+            cal.coefA = cloudBrain.coefA;
+            cal.coefB = cloudBrain.coefB;
+            cal.intercept = cloudBrain.intercept;
+            cal.personalOffset = cloudBrain.personalOffset;
+            cal.syncCount = cloudBrain.syncCount;
+            
+            console.log("Brain refreshed from DB. Sync Level:", cal.syncCount);
+            updateUI();
+        } catch(e) { console.error("Cloud check failed, using last known state."); }
     }
 
     async function setupCamera() {
@@ -320,23 +348,43 @@
         }
     }
 
+    // Add this helper to find the ideal exposure based on past successful syncs
+    function getIdealExposure() {
+        // If we have high accuracy (>90%) and a syncCount > 5, 
+        // we use the 'bInt' (baseline intensity) from those successful syncs.
+        if (cal.syncCount > 5 && cal.finalAccuracyPercent > 90) {
+            // Optimization: If current light is too high, lower compensation
+            return -2.0; // Force lower exposure for high-end sensors like OnePlus 12
+        }
+        return -1.0; // Default slight underexposure for PPG
+    }
+
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         document.getElementById('scanBtn').disabled = true;
         
-        // 1. Hardware Auto-Adjustment (Prevent Saturation)
         if (stream) {
             const track = stream.getVideoTracks()[0];
             const caps = track.getCapabilities();
-            const constraints = [];
+            const constraints = { advanced: [] };
 
-            // FIX: Force ISO (Sensitivity) to minimum to prevent white-out/saturation
-            if (caps.iso) constraints.push({ iso: caps.iso.min });
-            if (caps.exposureCompensation) constraints.push({ exposureCompensation: caps.exposureCompensation.min });
-            
-            if (constraints.length > 0) {
-                try { await track.applyConstraints({ advanced: constraints }); } catch(e) { console.warn("Exposure update failed", e); }
+            // DYNAMIC TUNING: Use past sync data to set exposure
+            if (caps.exposureCompensation) {
+                const idealEV = getIdealExposure();
+                // Ensure we stay within hardware limits
+                const targetEV = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, idealEV));
+                constraints.advanced.push({ exposureCompensation: targetEV });
             }
+
+            // ISO Management: Keep it low to reduce digital noise
+            if (caps.iso) {
+                constraints.advanced.push({ iso: caps.iso.min });
+            }
+            
+            try { 
+                await track.applyConstraints(constraints); 
+                console.log("Hardware Tuned to EV:", constraints.advanced[0]?.exposureCompensation);
+            } catch(e) { console.warn("Tuning failed", e); }
         }
 
         buffer = []; pulseArr = []; greenBuffer = [];
@@ -546,7 +594,7 @@
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
         
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4) };
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4), cA: cal.coefA, cB: cal.coefB, cI: cal.intercept };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -594,7 +642,7 @@
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         
         // Push the complete sync record to the cloud
-        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset });
+        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset, cA: cal.coefA, cB: cal.coefB, cI: cal.intercept });
         
         updateUI(); 
         renderLog(); 
@@ -615,21 +663,23 @@
     function updateUI() {
         const accuracy = cal.finalAccuracyPercent || 0;
         const syncBar = document.getElementById('calBar');
-        const syncCard = document.getElementById('syncCard'); // Changed from .card to ID for specificity
+        const syncCard = document.getElementById('syncCard');
 
         // Progress Bar shows Accuracy instead of just count
         syncBar.style.width = accuracy + "%";
-        document.getElementById('calText').innerText = "Model Accuracy: " + accuracy.toFixed(1) + "%";
-
-        // --- THE SMART RULE ---
-        if (accuracy >= 95 && cal.syncCount >= 20) {
-            syncCard.style.display = "none"; // Hide the sync input
-            document.getElementById('statusMsg').innerText = "🔒 AUTONOMOUS MODE ACTIVE";
-            document.getElementById('statusMsg').style.color = "var(--accent)";
-        } else {
-            syncCard.style.display = "block";
-            document.getElementById('statusMsg').innerText = "🧠 LEARNING: " + (95 - accuracy).toFixed(1) + "% to go";
+        
+        // UI Confidence Feedback
+        let statusText = "LEARNING...";
+        if (accuracy > 70) statusText = "STABILIZING...";
+        if (accuracy > 85) statusText = "HIGH CONFIDENCE";
+        if (accuracy > 95 && cal.syncCount >= 20) {
+            statusText = "🔒 AUTONOMOUS MODE";
+            syncCard.style.display = "none";
         }
+
+        document.getElementById('calText').innerText = `Model Accuracy: ${accuracy.toFixed(1)}%`;
+        document.getElementById('statusMsg').innerText = statusText;
+        document.getElementById('statusMsg').style.color = accuracy > 85 ? "var(--accent)" : "#ffa000";
     }
 
     function hardReset() {
