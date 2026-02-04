@@ -594,7 +594,7 @@
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
         
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4), cA: cal.coefA, cB: cal.coefB, cI: cal.intercept };
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4), coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -642,7 +642,7 @@
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         
         // Push the complete sync record to the cloud
-        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset, cA: cal.coefA, cB: cal.coefB, cI: cal.intercept });
+        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset, coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept });
         
         updateUI(); 
         renderLog(); 
