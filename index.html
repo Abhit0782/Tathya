@@ -393,7 +393,9 @@
         document.getElementById('scanBtn').disabled = true;
         
         buffer = []; pulseArr = []; greenBuffer = [];
-        const start = Date.now(), duration = 10000; 
+        let start = Date.now();
+        const duration = 10000;
+        let exposureFixed = false;
 
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
@@ -410,7 +412,25 @@
             if(intensity < 5) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
             
             // GATEKEEPER: Prevent data collection if signal is saturated (too bright)
-            if(intensity > 100) {
+            if(intensity > 95) {
+                // Auto-Fix: If too bright, force hardware exposure down
+                if (!exposureFixed && stream) {
+                    exposureFixed = true;
+                    updateStatus("ADJUSTING BRIGHTNESS...", "#ffa000");
+                    const track = stream.getVideoTracks()[0];
+                    const caps = track.getCapabilities ? track.getCapabilities() : null;
+                    if (caps && caps.exposureCompensation) {
+                        track.applyConstraints({ advanced: [
+                            { exposureMode: 'manual' }, 
+                            { exposureCompensation: caps.exposureCompensation.min }, 
+                            { iso: caps.iso ? caps.iso.min : 50 },
+                            { torch: true }
+                        ]}).catch(e => console.log(e));
+                    }
+                    start = Date.now(); // Restart timer
+                    buffer = []; greenBuffer = [];
+                    return;
+                }
                 updateStatus(`TOO BRIGHT (${intensity.toFixed(0)}) - PRESS HARDER`, "#ff9800");
                 pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
                 drawWave();
