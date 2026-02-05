@@ -396,7 +396,7 @@
                     const constraints = { advanced: [] };
                     // Force exposure down to reduce intensity from 200+ to ~60-80
                     if (caps.exposureCompensation) {
-                        constraints.advanced.push({ exposureCompensation: Math.max(caps.exposureCompensation.min, -2.0) });
+                        constraints.advanced.push({ exposureCompensation: caps.exposureCompensation.min });
                     }
                     if (caps.iso) constraints.advanced.push({ iso: caps.iso.min });
                     if (constraints.advanced.length > 0) await track.applyConstraints(constraints);
@@ -422,7 +422,7 @@
             let greenInt = g / (pix.length/4);
 
             if(intensity < 40) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
-            updateStatus("COLLECTING DATA...", "#00e676");
+            updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
             
             if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); }
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
