@@ -420,14 +420,19 @@
                     const track = stream.getVideoTracks()[0];
                     const caps = track.getCapabilities ? track.getCapabilities() : null;
                     if (caps && caps.exposureCompensation) {
-                        // Tune: If bright, try -3 (not min). If dark, try -1.
-                        const targetEV = isTooBright ? Math.max(caps.exposureCompensation.min, -3) : -1;
-                        track.applyConstraints({ advanced: [
+                        // Tune: If bright, try -3. If dark, try 0 (Neutral).
+                        const targetEV = isTooBright ? Math.max(caps.exposureCompensation.min, -3) : 0;
+                        
+                        const advancedConstraints = [
                             { exposureMode: 'manual' }, 
                             { exposureCompensation: targetEV }, 
-                            { iso: caps.iso ? caps.iso.min : 50 },
                             { torch: true }
-                        ]}).catch(e => console.log(e));
+                        ];
+                        
+                        // Only force low ISO if too bright. If dark, let ISO float/auto.
+                        if (isTooBright && caps.iso) advancedConstraints.push({ iso: caps.iso.min });
+                        
+                        track.applyConstraints({ advanced: advancedConstraints }).catch(e => console.log(e));
                     }
                     start = Date.now(); // Restart timer
                     buffer = []; greenBuffer = [];
@@ -436,6 +441,14 @@
 
             if(intensity > 95) {
                 updateStatus(`TOO BRIGHT (${intensity.toFixed(0)}) - PRESS HARDER`, "#ff9800");
+                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
+                drawWave();
+                return; // Skip adding to buffer
+            }
+            
+            // NEW: Prevent collection if too dark (Signal < 40 is unreliable)
+            if(intensity < 40) {
+                updateStatus(`TOO DARK (${intensity.toFixed(0)}) - ADJUST FINGER`, "#ff9800");
                 pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
                 drawWave();
                 return; // Skip adding to buffer
