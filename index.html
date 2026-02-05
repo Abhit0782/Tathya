@@ -385,35 +385,12 @@
 
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        await refreshBrain();
+        await refreshBrain(); // Get latest Brain from Cloud
         document.getElementById('scanBtn').disabled = true;
         
-        if (stream) {
-            const track = stream.getVideoTracks()[0];
-            const caps = track.getCapabilities();
-            const constraints = { advanced: [] };
-
-            // DYNAMIC TUNING: Use past sync data to set exposure
-            if (caps.exposureCompensation) {
-                const idealEV = getIdealExposure();
-                // Ensure we stay within hardware limits
-                const targetEV = Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, idealEV));
-                constraints.advanced.push({ exposureCompensation: targetEV });
-            }
-
-            // ISO Management: Keep it low to reduce digital noise
-            if (caps.iso) {
-                constraints.advanced.push({ iso: caps.iso.min });
-            }
-            
-            try { 
-                await track.applyConstraints(constraints); 
-                console.log("Hardware Tuned to EV:", constraints.advanced[0]?.exposureCompensation);
-            } catch(e) { console.warn("Tuning failed", e); }
-        }
-
         buffer = []; pulseArr = []; greenBuffer = [];
-        const start = Date.now(), duration = 10000; // 10-Second Smart Scan
+        const start = Date.now(), duration = 10000; 
+
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
@@ -421,41 +398,26 @@
             
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
-            for(let i=0; i<pix.length; i+=4) {
-                r += pix[i];
-                g += pix[i+1]; // Capture Green channel for pressure validation
-            }
+            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
+            
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
 
-            // Professional Signal Validation
-            if(intensity > 250) { updateStatus("TOO BRIGHT - ADJUST FINGER", "#f44336"); return; }
-            if(intensity < 40) { updateStatus("NO FINGER DETECTED", "#f44336"); return; }
-            updateStatus("ACQUIRING SIGNAL...", "#00e676");
+            if(intensity < 40) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
+            updateStatus("COLLECTING DATA...", "#00e676");
             
-            if(elapsed > 1500) { // Skip first 1.5s for exposure settling
-                buffer.push(intensity);
-                greenBuffer.push(greenInt);
-            }
+            if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); }
             pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-            drawWave();
-            updateBPM();
+            drawWave(); updateBPM();
             
             if (elapsed >= duration) {
                 clearInterval(timer);
-                // Check stability before finishing (Variance Check)
-                const variance = getVariance(buffer); 
-                // FIX: Allow higher variance for warmup scans so user doesn't get stuck
-                if(variance >= 300) { 
-                    alert("Reading Extremely Unstable. Please keep finger still.");
+                const varR = getVariance(buffer);
+                if(varR > 400) {
+                    updateStatus("TOO MUCH MOTION", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
-                    updateStatus("FAILED - TOO SHAKY", "#f44336");
-                } else if (buffer.length < 30) {
-                    alert("Insufficient Data. Ensure finger covers lens.");
-                    document.getElementById('scanBtn').disabled = false;
-                    updateStatus("FAILED - NO DATA", "#f44336");
                 } else {
-                    finishAnalysis(variance);
+                    finishAnalysis(varR);
                 }
             }
         }, 100);
@@ -500,144 +462,63 @@
     }
 
     function finishAnalysis(variance) {
-        // SCIENTIFIC CHECK 1: Perfusion Index (PI)
-        // Validates that we are seeing actual pulsating blood flow, not just a red finger.
-        // PI = (AC Component / DC Component) * 100
-        const pMax = Math.max(...pulseArr);
-        const pMin = Math.min(...pulseArr);
-        const pAvg = pulseArr.reduce((a,b)=>a+b,0)/pulseArr.length;
-        const PI = ((pMax - pMin) / pAvg) * 100;
-
-        // SCIENTIFIC CHECK 2: Pressure Stability (Green Channel)
-        // Green light is absorbed by blood volume. High variance in Green = User is changing pressure.
-        const greenVar = getVariance(greenBuffer);
-
-        if (PI < 0.1) { // < 0.1% usually means no pulse detected
-            alert("Signal Weak. Adjust finger pressure.");
-            document.getElementById('scanBtn').disabled = false;
-            updateStatus("FAILED - LOW PI", "#f44336");
-            return;
-        }
+        const redAvg = buffer.reduce((a,b)=>a+b,0)/buffer.length;
+        const greenAvg = greenBuffer.reduce((a,b)=>a+b,0)/greenBuffer.length;
         
-        if (greenVar > 50) { // Relaxed threshold for batch mode
-            alert("Unstable Pressure. Keep finger steady.");
-            document.getElementById('scanBtn').disabled = false;
-            updateStatus("FAILED - PRESSURE", "#f44336");
-            return;
-        }
-
-        // 3. PPG Gating (Diastolic Peak Detection)
-        // We look for local maximums in intensity (where blood volume is lowest)
-        let peaks = buffer.filter((val, i, arr) => {
-            return i > 0 && i < arr.length - 1 && val > arr[i-1] && val > arr[i+1];
-        });
-
-        if (peaks.length === 0) peaks = buffer; // Fallback if no pulse detected
+        // 1. Dynamic Baseline (from Enrollment or Default)
+        const base = parseFloat(enrollmentData?.baseline) || 220;
         
-        const avg = peaks.reduce((a, b) => a + b, 0) / peaks.length;
-        const avgGreen = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+        // 2. Absorbance Calculation
+        const rawAbs = Math.log(base / redAvg);
         
-        // --- START: New Non-Linear Absorbance Model ---
+        // 3. Pressure Compensation (PGR)
+        const pgr = greenAvg > 0 ? (redAvg / greenAvg) : 2.5;
+        const normAbs = rawAbs * (pgr / 2.5);
 
-        const currentBaseline = 220;
+        // 4. Prediction using Quadratic Brain
+        let val = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept + (cal.personalOffset || 0);
+        val = Math.round(Math.max(40, Math.min(500, val)));
 
-        // 1. Calculate Absorbance (The ratio of raw light to the baseline)
-        // This makes the reading relative, providing immunity to baseline drift.
-        const absorbance = Math.log(currentBaseline / avg);
-
-        // 2. Polynomial Prediction (Non-linear mapping)
-        // Formula: Result = (A * Abs^2) + (B * Abs) + C + PersonalOffset
-        let result = (cal.coefA * Math.pow(absorbance, 2)) + 
-                     (cal.coefB * absorbance) + 
-                     cal.intercept + 
-                     (cal.personalOffset || 0);
-
-        if (!isFinite(result) || isNaN(result)) {
-            result = 0; // Prevent NaN propagation
-        }
-
-        result = Math.round(result);
-
-        // --- END: New Model ---
-        
-        // --- BATCH LOGIC (Best of 5) ---
-        sessionBuffer.push({ val: result, raw: avg, greenRaw: avgGreen, abs: absorbance, var: variance });
+        // 5. Batch Logic Management
+        sessionBuffer.push({ val: val, abs: normAbs, raw: redAvg, var: variance });
         const count = sessionBuffer.length;
 
         if (count < 5) {
-            document.getElementById('gluResult').innerText = result;
-            document.getElementById('timer').innerText = `SCAN ${count}/5`;
-            
-            let msg = `WARMUP ${count}/5 - SENSOR STABILIZING`;
-            if (count >= 3) msg = `OPTIMIZING ${count}/5 - ALMOST READY`;
-            
-            updateStatus(msg, "#ffa000");
+            document.getElementById('gluResult').innerText = val;
+            updateStatus(`WARMUP ${count}/5 - KEEP STILL`, "#ffa000");
             document.getElementById('scanBtn').disabled = false;
-            document.getElementById('scanBtn').innerText = `CONTINUE SCAN (${count+1}/5)`;
-            
-            alert(`Warmup Scan ${count}/5 Complete.\nResult: ${result}\n\nNote: First 2-3 scans are for sensor warmup. Results improve significantly from scan 4.`);
-            return; // Do not save to DB yet
+            document.getElementById('scanBtn').innerText = `CONTINUE (${count}/5)`;
+            return; 
         }
 
-        // Calculate Final Result (Average of top 3 most stable scans)
-        sessionBuffer.sort((a,b) => a.var - b.var); // Sort by lowest variance (cleanest signal)
-        const best3 = sessionBuffer.slice(0, 3);
-        
-        // --- THE REVOLUTIONARY "TATHYA" ENGINE ---
-        const redAvg = best3.reduce((s, i) => s + i.raw, 0) / 3;
-        const greenAvg = best3.reduce((s, i) => s + (i.greenRaw || i.raw * 0.4), 0) / 3;
-
-        // 1. Calculate the Perfusion-Glucose Ratio (PGR)
-        // This cancels out 'Morning Drift' and pressure errors automatically.
-        const pgr = redAvg / greenAvg;
-
-        // 2. High-Fidelity Absorbance with PPG Normalization
-        const baseline = 220; 
-        const rawAbs = Math.log(baseline / redAvg);
-        const normalizedAbs = rawAbs * (pgr / 2.5); // 2.5 is the average Sony LYT-808 ratio
-
-        // 3. Autonomous Prediction
-        let finalVal = (cal.coefA * Math.pow(normalizedAbs, 2)) + 
-                       (cal.coefB * normalizedAbs) + 
-                       cal.intercept;
-
-        // 4. Personalization (Learned from your 36+ syncs)
-        finalVal = (finalVal * (cal.sensitivityScale || 1.0)) + (cal.personalOffset || 0);
-
-        // Round and Display
-        finalVal = Math.round(finalVal);
-        
-        // Map back to variables used for logging
-        const finalRaw = redAvg;
-        const finalAbs = normalizedAbs;
-
-        // Reset for next batch
-        sessionBuffer = [];
-        document.getElementById('scanBtn').innerText = "START SMART SCAN";
+        // Final Process (End of Batch)
+        sessionBuffer.sort((a,b) => a.var - b.var);
+        const finalVal = Math.round(sessionBuffer.slice(0,3).reduce((s,i)=>s+i.val, 0)/3);
+        const finalAbs = sessionBuffer[0].abs;
+        const finalRaw = sessionBuffer[0].raw;
 
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
         
         const logEntry = { 
             name: enrollmentData.name, 
             time: new Date().toLocaleTimeString(), 
             val: finalVal, 
-            raw: finalRaw.toFixed(3), 
+            raw: finalRaw.toFixed(2), 
             actual: "--", 
             type: "BATCH_SCAN", 
             absorbance: finalAbs.toFixed(4),
-            coefA: cal.coefA, 
-            coefB: cal.coefB, 
-            intercept: cal.intercept,
-            offset: cal.personalOffset
+            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset
         };
-        history.unshift(logEntry); if(history.length > 10) history.pop();
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
+
+        history.unshift(logEntry);
+        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
         pushToCloud(logEntry);
-        renderLog(); drawTrend(); 
+        
+        sessionBuffer = [];
         document.getElementById('scanBtn').disabled = false;
         document.getElementById('scanBtn').innerText = "START SMART SCAN";
+        renderLog(); drawTrend();
     }
 
     function syncCal() {
