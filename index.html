@@ -387,21 +387,23 @@
         if(!torch) return alert("Enable Flash.");
         await refreshBrain(); // Get latest Brain from Cloud
         
-        // FIX: Restore hardware exposure tuning to handle high-sensitivity sensors (e.g. OnePlus)
+        // FIX: Aggressive Hardware Lock to force low ISO/Exposure
         if (stream) {
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = track.getCapabilities ? track.getCapabilities() : null;
                 if (caps) {
-                    const constraints = { advanced: [] };
-                    // Force exposure down to reduce intensity from 200+ to ~60-80
-                    if (caps.exposureCompensation) {
-                        constraints.advanced.push({ exposureCompensation: caps.exposureCompensation.min });
-                    }
-                    if (caps.iso) constraints.advanced.push({ iso: caps.iso.min });
-                    if (constraints.advanced.length > 0) await track.applyConstraints(constraints);
+                    // We force the lowest possible exposure and ISO
+                    const constraints = {
+                        advanced: [
+                            { exposureMode: 'manual' }, 
+                            { exposureCompensation: caps.exposureCompensation ? caps.exposureCompensation.min : -2.0 },
+                            { iso: caps.iso ? caps.iso.min : 50 }
+                        ]
+                    };
+                    await track.applyConstraints(constraints);
                 }
-            } catch(e) { console.warn("Exposure tuning failed", e); }
+            } catch(e) { console.warn("Hardware lock ignored by browser.", e); }
         }
 
         document.getElementById('scanBtn').disabled = true;
@@ -422,6 +424,15 @@
             let greenInt = g / (pix.length/4);
 
             if(intensity < 40) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
+            
+            // GATEKEEPER: Prevent data collection if signal is saturated (too bright)
+            if(intensity > 100) {
+                updateStatus(`TOO BRIGHT (${intensity.toFixed(0)}) - PRESS HARDER`, "#ff9800");
+                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
+                drawWave();
+                return; // Skip adding to buffer
+            }
+            
             updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
             
             if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); }
@@ -430,6 +441,13 @@
             
             if (elapsed >= duration) {
                 clearInterval(timer);
+                
+                if(buffer.length < 30) {
+                    updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
+                    document.getElementById('scanBtn').disabled = false;
+                    return;
+                }
+                
                 const varR = getVariance(buffer);
                 if(varR > 400) {
                     updateStatus("TOO MUCH MOTION", "#f44336");
@@ -520,6 +538,7 @@
         const finalVal = Math.round(sessionBuffer.slice(0,3).reduce((s,i)=>s+i.val, 0)/3);
         const finalAbs = sessionBuffer[0].abs;
         const finalRaw = sessionBuffer[0].raw;
+        const finalNoise = sessionBuffer[0].var; // Get the noise from the most stable scan
 
         document.getElementById('gluResult').innerText = finalVal;
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
@@ -531,6 +550,8 @@
             raw: finalRaw.toFixed(2), 
             actual: "--", 
             type: "BATCH_SCAN", 
+            noise: finalNoise.toFixed(2),
+            finger: currentFinger,
             absorbance: finalAbs.toFixed(4),
             coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset
         };
