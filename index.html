@@ -359,33 +359,8 @@
         return -1.0; // Default slight underexposure for PPG
     }
 
-    // Global function to pull the latest brain from the cloud
-    async function refreshBrain() {
-        if(!enrollmentData) return;
-        updateStatus("SYNCING BRAIN...", "#ffa000");
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
-            });
-            const brain = await resp.json();
-            
-            // Strictly use DB coefficients
-            cal.coefA = brain.coefA;
-            cal.coefB = brain.coefB;
-            cal.intercept = brain.intercept;
-            cal.personalOffset = brain.personalOffset;
-            cal.syncCount = brain.syncCount;
-            
-            updateUI();
-            console.log(`Brain Mode: ${brain.status} | Syncs: ${cal.syncCount}`);
-        } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
-    }
-
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        await refreshBrain();
         document.getElementById('scanBtn').disabled = true;
         
         if (stream) {
@@ -619,19 +594,7 @@
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
         
-        const logEntry = { 
-            name: enrollmentData.name, 
-            time: new Date().toLocaleTimeString(), 
-            val: finalVal, 
-            raw: finalRaw.toFixed(3), 
-            actual: "--", 
-            type: "BATCH_SCAN", 
-            absorbance: finalAbs.toFixed(4),
-            coefA: cal.coefA, 
-            coefB: cal.coefB, 
-            intercept: cal.intercept,
-            offset: cal.personalOffset
-        };
+        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4), offset: cal.personalOffset, coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
