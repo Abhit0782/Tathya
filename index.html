@@ -397,8 +397,8 @@
                     const constraints = {
                         advanced: [
                             { exposureMode: 'manual' }, 
-                            // Target -2.0 EV. If device min is higher (e.g. -1), use device min.
-                            { exposureCompensation: caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, -2.0) : -2.0 },
+                            // Target -1.0 EV (Brighter than -2.0) to boost intensity from ~40 to ~80
+                            { exposureCompensation: caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, -1.0) : -1.0 },
                             { iso: caps.iso ? caps.iso.min : 50 },
                             { torch: true } 
                         ]
