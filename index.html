@@ -385,7 +385,8 @@
 
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        await refreshBrain(); // Get latest Brain from Cloud
+        // OPTIMIZATION: Only fetch brain on the first scan of the batch to reduce latency
+        if (sessionBuffer.length === 0) await refreshBrain(); 
         
         // FIX: Aggressive Hardware Lock to force low ISO/Exposure
         if (stream) {
@@ -397,8 +398,9 @@
                     const constraints = {
                         advanced: [
                             { exposureMode: 'manual' }, 
-                            { exposureCompensation: caps.exposureCompensation ? caps.exposureCompensation.min : -2.0 },
-                            { iso: caps.iso ? caps.iso.min : 50 }
+                            { exposureCompensation: caps.exposureCompensation ? caps.exposureCompensation.min : -8.0 },
+                            { iso: caps.iso ? caps.iso.min : 50 },
+                            { torch: true } // FIX: Ensure flash stays ON when reapplying constraints
                         ]
                     };
                     await track.applyConstraints(constraints);
@@ -445,6 +447,7 @@
                 if(buffer.length < 30) {
                     updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
+                    document.getElementById('scanBtn').innerText = "RETRY SCAN";
                     return;
                 }
                 
