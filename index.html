@@ -359,8 +359,33 @@
         return -1.0; // Default slight underexposure for PPG
     }
 
+    // Global function to pull the latest brain from the cloud
+    async function refreshBrain() {
+        if(!enrollmentData) return;
+        updateStatus("SYNCING BRAIN...", "#ffa000");
+        try {
+            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
+                method: 'POST', 
+                headers: { "Content-Type": "text/plain" },
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+            });
+            const brain = await resp.json();
+            
+            // Strictly use DB coefficients
+            cal.coefA = brain.coefA;
+            cal.coefB = brain.coefB;
+            cal.intercept = brain.intercept;
+            cal.personalOffset = brain.personalOffset;
+            cal.syncCount = brain.syncCount;
+            
+            updateUI();
+            console.log(`Brain Mode: ${brain.status} | Syncs: ${cal.syncCount}`);
+        } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
+    }
+
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
+        await refreshBrain();
         document.getElementById('scanBtn').disabled = true;
         
         if (stream) {
@@ -594,7 +619,19 @@
         document.getElementById('timer').innerText = "DONE";
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
         
-        const logEntry = { name: enrollmentData.name, time: new Date().toLocaleTimeString(), val: finalVal, raw: finalRaw.toFixed(3), actual: "--", noise: variance ? variance.toFixed(2) : "0", type: "BATCH_SCAN", finger: currentFinger, absorbance: finalAbs.toFixed(4), offset: cal.personalOffset, coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept };
+        const logEntry = { 
+            name: enrollmentData.name, 
+            time: new Date().toLocaleTimeString(), 
+            val: finalVal, 
+            raw: finalRaw.toFixed(3), 
+            actual: "--", 
+            type: "BATCH_SCAN", 
+            absorbance: finalAbs.toFixed(4),
+            coefA: cal.coefA, 
+            coefB: cal.coefB, 
+            intercept: cal.intercept,
+            offset: cal.personalOffset
+        };
         history.unshift(logEntry); if(history.length > 10) history.pop();
         localStorage.setItem('tathya_hist', JSON.stringify(history));
         pushToCloud(logEntry);
@@ -661,26 +698,40 @@
     }
 
     function updateUI() {
-        const accuracy = cal.finalAccuracyPercent || 0;
-        const syncBar = document.getElementById('calBar');
-        const syncCard = document.getElementById('syncCard');
-
-        // Progress Bar shows Accuracy instead of just count
-        syncBar.style.width = accuracy + "%";
-        
-        // UI Confidence Feedback
-        let statusText = "LEARNING...";
-        if (accuracy > 70) statusText = "STABILIZING...";
-        if (accuracy > 85) statusText = "HIGH CONFIDENCE";
-        if (accuracy > 95 && cal.syncCount >= 20) {
-            statusText = "🔒 AUTONOMOUS MODE";
-            syncCard.style.display = "none";
-        }
-
-        document.getElementById('calText').innerText = `Model Accuracy: ${accuracy.toFixed(1)}%`;
-        document.getElementById('statusMsg').innerText = statusText;
-        document.getElementById('statusMsg').style.color = accuracy > 85 ? "var(--accent)" : "#ffa000";
+    const syncCount = cal.syncCount || 0;
+    const syncBar = document.getElementById('calBar');
+    const syncCard = document.getElementById('syncCard');
+    
+    // Calculate Confidence based on Sync Milestones
+    // 0 syncs = 5%, 20 syncs = 100%
+    let confidence = Math.min(100, Math.max(5, (syncCount / 20) * 100));
+    
+    // If we have local accuracy data, factor it in
+    if (cal.finalAccuracyPercent > 0) {
+        confidence = (confidence + cal.finalAccuracyPercent) / 2;
     }
+
+    syncBar.style.width = confidence + "%";
+    
+    let statusText = "LEARNING (SYNC " + syncCount + "/20)";
+    let statusColor = "#ffa000";
+
+    if (syncCount >= 5 && syncCount < 15) {
+        statusText = "STABILIZING BIOMETRICS";
+        statusColor = "#2196f3";
+    } else if (syncCount >= 15 && syncCount < 20) {
+        statusText = "HIGH CONFIDENCE";
+        statusColor = "var(--accent)";
+    } else if (syncCount >= 20) {
+        statusText = "🔒 AUTONOMOUS MODE";
+        statusColor = "var(--accent)";
+        syncCard.style.display = "none"; // Hide sync input in autonomous mode
+    }
+
+    document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
+    document.getElementById('statusMsg').innerText = statusText;
+    document.getElementById('statusMsg').style.color = statusColor;
+}
 
     function hardReset() {
         if(confirm("This will wipe all data and reset the app. Continue?")) {
