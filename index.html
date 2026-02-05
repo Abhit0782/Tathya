@@ -587,7 +587,7 @@
         
         // --- START: New Non-Linear Absorbance Model ---
 
-        const currentBaseline = (enrollmentData && enrollmentData.baseline) ? parseFloat(enrollmentData.baseline) : 220;
+        const currentBaseline = 220;
 
         // 1. Calculate Absorbance (The ratio of raw light to the baseline)
         // This makes the reading relative, providing immunity to baseline drift.
@@ -640,9 +640,9 @@
         const pgr = redAvg / greenAvg;
 
         // 2. High-Fidelity Absorbance with PPG Normalization
-        const baseline = (enrollmentData && enrollmentData.baseline) ? parseFloat(enrollmentData.baseline) : 220; 
+        const baseline = 220; 
         const rawAbs = Math.log(baseline / redAvg);
-        const normalizedAbs = rawAbs; // Removed PGR scaling to prevent absorbance explosion
+        const normalizedAbs = rawAbs * (pgr / 2.5); // 2.5 is the average Sony LYT-808 ratio
 
         // 3. Autonomous Prediction
         let finalVal = (cal.coefA * Math.pow(normalizedAbs, 2)) + 
