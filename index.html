@@ -124,7 +124,6 @@
 
     <div class="card" id="syncCard">
         <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
-        <button onclick="forceReIndex()" style="background:#333; border:none; color:white; padding:10px; border-radius:12px; font-weight:bold; width:100%; margin-top:10px;">FORCE CLOUD RE-INDEX</button>
         <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
     </div>
 
@@ -149,7 +148,6 @@
         syncCount: 0, 
         finalAccuracyPercent: 0,
         coefA: 88.38, coefB: -84.54, intercept: 154.21, // Updated for Fast-Learn
-        isSmart: false, // For Autonomous Mode
         personalOffset: 0,
         sensitivityScale: 1.0
     };
@@ -161,7 +159,6 @@
         if (c.coefA == null || isNaN(c.coefA)) c.coefA = defaultCal.coefA;
         if (c.coefB == null || isNaN(c.coefB)) c.coefB = defaultCal.coefB;
         if (c.intercept == null || isNaN(c.intercept)) c.intercept = defaultCal.intercept;
-        if (c.isSmart == null) c.isSmart = false;
         // Fix NaN corruption
         if (isNaN(c.personalOffset)) c.personalOffset = 0;
         if (isNaN(c.bInt) || c.bInt <= 0) c.bInt = 220;
@@ -335,7 +332,6 @@
                 cal.coefB = cloudData.coefB;
                 cal.intercept = cloudData.intercept;
                 cal.personalOffset = cloudData.personalOffset;
-                cal.isSmart = cloudData.isSmart || false;
                 cal.syncCount = cloudData.syncCount;
                 cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
                 saveCal(); // Save to both global and finger profile
@@ -381,58 +377,14 @@
             cal.intercept = brain.intercept;
             cal.personalOffset = brain.personalOffset;
             cal.syncCount = brain.syncCount;
-            cal.isSmart = brain.isSmart || false;
             
             updateUI();
             console.log(`Brain Mode: ${brain.status} | Syncs: ${cal.syncCount}`);
         } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
     }
 
-    async function checkSensorHealth() {
-        ctx.drawImage(v, 0, 0, 50, 50);
-        let pix = ctx.getImageData(0, 0, 50, 50).data;
-        let r = 0, g = 0, b = 0;
-        
-        for(let i=0; i<pix.length; i+=4) {
-            r += pix[i]; g += pix[i+1]; b += pix[i+2];
-        }
-        
-        let total = pix.length / 4;
-        let avgR = r / total;
-        let avgG = g / total;
-        let avgB = b / total;
-
-        // 1. Dirty Lens Check: If Red and Green are too close, the lens is foggy/smudged
-        if (Math.abs(avgR - avgG) < 30) {
-            updateStatus("DIRTY LENS - PLEASE WIPE", "#f44336");
-            return false;
-        }
-
-        // 2. Ambient Light Leak: If Blue is high, external light is leaking in
-        if (avgB > 50) {
-            updateStatus("LIGHT LEAK - PRESS FIRMLY", "#ffa000");
-            return false;
-        }
-
-        // 3. Sensor Saturation: If Red is maxed out, flash is too bright or sensor is unstable
-        if (avgR > 250) {
-            updateStatus("OVEREXPOSED - ADJUST LENS", "#f44336");
-            return false;
-        }
-
-        return true; // Sensor is healthy
-    }
-
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-
-        // Sensor Health Check
-        const isHealthy = await checkSensorHealth();
-        if (!isHealthy) {
-            document.getElementById('scanBtn').disabled = false;
-            return; 
-        }
-
         await refreshBrain();
         document.getElementById('scanBtn').disabled = true;
         
@@ -746,35 +698,40 @@
     }
 
     function updateUI() {
-        const syncCount = cal.syncCount || 0;
-        const isSmart = cal.isSmart || false; 
-        const syncBar = document.getElementById('calBar');
-        
-        // Confidence is now a data-driven metric
-        let confidence = isSmart ? 100 : Math.min(98, (syncCount / 15) * 100);
-        syncBar.style.width = confidence + "%";
-        
-        if (isSmart) {
-            document.getElementById('statusMsg').innerText = "🔒 AUTONOMOUS MODE";
-            document.getElementById('statusMsg').style.color = "var(--accent)";
-            document.getElementById('syncCard').style.display = "none";
-            document.getElementById('calText').innerText = "Sensor Intelligence Converged";
-        } else {
-            document.getElementById('statusMsg').innerText = `CALIBRATING (${syncCount} SYNCS)`;
-            document.getElementById('calText').innerText = `Confidence: ${confidence.toFixed(0)}%`;
-            document.getElementById('syncCard').style.display = "block"; // Ensure it's visible if not smart
-        }
+    const syncCount = cal.syncCount || 0;
+    const syncBar = document.getElementById('calBar');
+    const syncCard = document.getElementById('syncCard');
+    
+    // Calculate Confidence based on Sync Milestones
+    // 0 syncs = 5%, 20 syncs = 100%
+    let confidence = Math.min(100, Math.max(5, (syncCount / 20) * 100));
+    
+    // If we have local accuracy data, factor it in
+    if (cal.finalAccuracyPercent > 0) {
+        confidence = (confidence + cal.finalAccuracyPercent) / 2;
     }
 
-    async function forceReIndex() {
-        if(!enrollmentData) return alert("Please enroll first.");
-        updateStatus("FORCING CLOUD RE-INDEX...", "#f44336");
-        document.getElementById('scanBtn').disabled = true;
-        await refreshBrain(); // This reuses the existing brain-syncing function
-        document.getElementById('scanBtn').disabled = false;
-        alert("Re-Index complete. The latest intelligence has been synced from the cloud.");
-        updateStatus("RE-INDEX COMPLETE", "var(--accent)");
+    syncBar.style.width = confidence + "%";
+    
+    let statusText = "LEARNING (SYNC " + syncCount + "/20)";
+    let statusColor = "#ffa000";
+
+    if (syncCount >= 5 && syncCount < 15) {
+        statusText = "STABILIZING BIOMETRICS";
+        statusColor = "#2196f3";
+    } else if (syncCount >= 15 && syncCount < 20) {
+        statusText = "HIGH CONFIDENCE";
+        statusColor = "var(--accent)";
+    } else if (syncCount >= 20) {
+        statusText = "🔒 AUTONOMOUS MODE";
+        statusColor = "var(--accent)";
+        syncCard.style.display = "none"; // Hide sync input in autonomous mode
     }
+
+    document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
+    document.getElementById('statusMsg').innerText = statusText;
+    document.getElementById('statusMsg').style.color = statusColor;
+}
 
     function hardReset() {
         if(confirm("This will wipe all data and reset the app. Continue?")) {
