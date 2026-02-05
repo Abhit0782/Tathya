@@ -386,6 +386,24 @@
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         await refreshBrain(); // Get latest Brain from Cloud
+        
+        // FIX: Restore hardware exposure tuning to handle high-sensitivity sensors (e.g. OnePlus)
+        if (stream) {
+            try {
+                const track = stream.getVideoTracks()[0];
+                const caps = track.getCapabilities ? track.getCapabilities() : null;
+                if (caps) {
+                    const constraints = { advanced: [] };
+                    // Force exposure down to reduce intensity from 200+ to ~60-80
+                    if (caps.exposureCompensation) {
+                        constraints.advanced.push({ exposureCompensation: Math.max(caps.exposureCompensation.min, -2.0) });
+                    }
+                    if (caps.iso) constraints.advanced.push({ iso: caps.iso.min });
+                    if (constraints.advanced.length > 0) await track.applyConstraints(constraints);
+                }
+            } catch(e) { console.warn("Exposure tuning failed", e); }
+        }
+
         document.getElementById('scanBtn').disabled = true;
         
         buffer = []; pulseArr = []; greenBuffer = [];
@@ -469,10 +487,15 @@
         const base = parseFloat(enrollmentData?.baseline) || 220;
         
         // 2. Absorbance Calculation
-        const rawAbs = Math.log(base / redAvg);
+        let rawAbs = Math.log(base / redAvg);
+        // FIX: Clamp Absorbance to prevent extreme values from dark/bright outliers
+        rawAbs = Math.min(2.5, Math.max(-0.5, rawAbs));
         
         // 3. Pressure Compensation (PGR)
-        const pgr = greenAvg > 0 ? (redAvg / greenAvg) : 2.5;
+        let pgr = greenAvg > 0 ? (redAvg / greenAvg) : 2.5;
+        // FIX: Clamp PGR to prevent outliers (valid range typically 1.0 - 3.5)
+        pgr = Math.max(1.0, Math.min(3.5, pgr));
+        
         const normAbs = rawAbs * (pgr / 2.5);
 
         // 4. Prediction using Quadratic Brain
