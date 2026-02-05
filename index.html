@@ -508,9 +508,10 @@
 
         if (count < 5) {
             document.getElementById('gluResult').innerText = val;
-            updateStatus(`WARMUP ${count}/5 - KEEP STILL`, "#ffa000");
-            document.getElementById('scanBtn').disabled = false;
-            document.getElementById('scanBtn').innerText = `CONTINUE (${count}/5)`;
+            updateStatus(`WARMUP ${count}/5 - AUTO STARTING...`, "#ffa000");
+            document.getElementById('scanBtn').disabled = true;
+            document.getElementById('scanBtn').innerText = `AUTO SCAN (${count}/5)`;
+            setTimeout(runAnalysis, 1500); // Automatically start next scan after 1.5s
             return; 
         }
 
