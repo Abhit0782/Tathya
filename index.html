@@ -535,7 +535,7 @@
         // This prevents "Brighter = Higher Result" errors.
         const acComponent = Math.sqrt(variance); // Standard Deviation represents Pulse Energy (AC)
         const perfusionIndex = acComponent / redAvg; // Normalized Ratio (AC/DC)
-        let rawAbs = perfusionIndex * 25; // Scale PI (typically 0.04-0.10) to Model Range (1.0-2.5)
+        let rawAbs = perfusionIndex * 100; // Scale PI (typically 0.01) to Model Range (~1.0)
         
         rawAbs = Math.min(3.0, Math.max(0.1, rawAbs)); // Safety Clamp
         
