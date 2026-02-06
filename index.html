@@ -420,10 +420,14 @@
                     await new Promise(r => setTimeout(r, 1200));
                     
                     // Phase 2: Lock settings to prevent focus-hunting noise during scan
+                    // FIX: Force EV 0 (Neutral) to ensure sufficient brightness (prevents 20-21 intensity)
+                    const targetEV = caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, 0)) : 0;
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'manual' },
-                            { whiteBalanceMode: 'manual' }
+                            { whiteBalanceMode: 'manual' },
+                            { exposureCompensation: targetEV },
+                            { torch: true }
                         ]
                     });
                 }
@@ -439,8 +443,8 @@
             
             if (elapsed >= duration) {
                 clearInterval(timer);
-                // Relaxed buffer requirement to 150 frames (approx 6 seconds of good data)
-                if(buffer.length < 150) { 
+                // Relaxed buffer requirement to 100 frames (approx 4 seconds of good data)
+                if(buffer.length < 100) { 
                     updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                     document.getElementById('scanBtn').innerText = "RETRY SCAN";
@@ -473,9 +477,9 @@
                 return; 
             }
             
-            if(intensity > 245) { // Pushed max limit higher
+            if(intensity > 250) { // Pushed max limit higher
                 updateStatus("TOO BRIGHT - PRESS HARDER", "#ff9800");
-            } else if(intensity < 15) { // Lowered min limit for dark sensors
+            } else if(intensity < 8) { // Lowered min limit for dark sensors (was 15)
                 updateStatus("TOO DARK - LIGHTEN PRESSURE", "#ff9800");
             } else {
                 updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
