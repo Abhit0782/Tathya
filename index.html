@@ -572,17 +572,22 @@
         // We analyze the 'fullWaveform' to find the time from trough to peak.
         // NEW PROTECTED UPSTROKE LOGIC
         let upstrokeTime = 120; // Default fallback
-        if (fullWaveform.length > 20) {
+        
+        // FIX: Smooth the waveform to detect peaks even in low light (Raw 12.52)
+        const numericWave = fullWaveform.map(Number);
+        const smoothedWave = applyGaussianFilter(numericWave);
+
+        if (smoothedWave.length > 20) {
             let lastTrough = -1, lastPeak = -1;
             // Find last valid trough/peak pair in the signal
-            for (let i = fullWaveform.length - 5; i > 1; i--) {
-                if (fullWaveform[i] < fullWaveform[i-1] && fullWaveform[i] < fullWaveform[i+1]) {
+            for (let i = smoothedWave.length - 5; i > 1; i--) {
+                if (smoothedWave[i] < smoothedWave[i-1] && smoothedWave[i] < smoothedWave[i+1]) {
                     lastTrough = i; break;
                 }
             }
             if (lastTrough > 0) {
-                for (let j = lastTrough; j < fullWaveform.length - 1; j++) {
-                    if (fullWaveform[j] > fullWaveform[j-1] && fullWaveform[j] > fullWaveform[j+1]) {
+                for (let j = lastTrough; j < smoothedWave.length - 1; j++) {
+                    if (smoothedWave[j] > smoothedWave[j-1] && smoothedWave[j] > smoothedWave[j+1]) {
                         lastPeak = j;
                         break;
                     }
