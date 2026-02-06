@@ -337,7 +337,7 @@
                 body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
             });
             const cloudData = await resp.json();
-            if (cloudData && cloudData.syncCount > 0) {
+            if (cloudData && cloudData.userFound) {
                 // Switched to new non-linear model from the cloud
                 cal.coefA = cloudData.coefA;
                 cal.coefB = cloudData.coefB;
