@@ -396,32 +396,40 @@
 
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        // OPTIMIZATION: Only fetch brain on the first scan of the batch to reduce latency
         if (sessionBuffer.length === 0) await refreshBrain(); 
         
-        // FIX: Restore Hardware Lock with safe defaults (-2 EV) to prevent "Too Dark" or "Too Bright" loops
+        document.getElementById('scanBtn').disabled = true;
+        updateStatus("INITIALIZING SENSOR...", "#2196f3");
+
+        // 1. HARDWARE AUTO-RECOVERY: Let the camera 'find' the finger first
         if (stream) {
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = track.getCapabilities ? track.getCapabilities() : null;
                 if (caps) {
-                    const constraints = {
+                    // Phase 1: Continuous mode to prevent "Too Dark" loop
+                    await track.applyConstraints({
                         advanced: [
-                            { exposureMode: 'manual' }, 
-                            // Target -2.0 EV for OnePlus 12 stability (Low Light Mode)
-                            { exposureCompensation: caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, -2.0) : -2.0 },
-                            { iso: caps.iso ? caps.iso.min : 50 },
-                            { whiteBalanceMode: 'manual' },
-                            { torch: true } 
+                            { exposureMode: 'continuous' },
+                            { whiteBalanceMode: 'continuous' },
+                            { torch: true }
                         ]
-                    };
-                    await track.applyConstraints(constraints);
+                    });
+                    
+                    // Wait 1.2 seconds for the hardware to stabilize brightness
+                    await new Promise(r => setTimeout(r, 1200));
+                    
+                    // Phase 2: Lock settings to prevent focus-hunting noise during scan
+                    await track.applyConstraints({
+                        advanced: [
+                            { exposureMode: 'manual' },
+                            { whiteBalanceMode: 'manual' }
+                        ]
+                    });
                 }
-            } catch(e) { console.warn("Hardware lock ignored by browser.", e); }
+            } catch(e) { console.warn("Hardware lock bypassed."); }
         }
 
-        document.getElementById('scanBtn').disabled = true;
-        
         buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
         let start = Date.now();
         const duration = 10000;
@@ -429,11 +437,10 @@
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
             
-            // MOVED CHECK UP: Ensure scan finishes even if signal is bad (prevents "stuck" app)
             if (elapsed >= duration) {
                 clearInterval(timer);
-                
-                if(buffer.length < 30) {
+                // Relaxed buffer requirement to 150 frames (approx 6 seconds of good data)
+                if(buffer.length < 150) { 
                     updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                     document.getElementById('scanBtn').innerText = "RETRY SCAN";
@@ -441,13 +448,13 @@
                 }
                 
                 const varR = getVariance(buffer);
-                if(varR > 400) {
+                if(varR > 600) { // Increased tolerance for motion noise
                     updateStatus("TOO MUCH MOTION", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                 } else {
                     finishAnalysis(varR);
                 }
-                return; // Stop execution of this interval iteration
+                return;
             }
 
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
@@ -460,29 +467,30 @@
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
 
-            if(intensity < 5) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
-            
-            if(intensity > 95) {
-                updateStatus(`TOO BRIGHT (${intensity.toFixed(0)}) - PRESS HARDER`, "#ff9800");
-                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-                drawWave();
-                return; // Skip adding to buffer
+            // 2. WIDENED THRESHOLDS: Prevents false "Place Finger" errors
+            if(intensity < 2) { 
+                updateStatus("PLACE FINGER FIRMLY", "#f44336"); 
+                return; 
             }
             
-            // NEW: Prevent collection if too dark (Signal < 40 is unreliable)
-            if(intensity < 40) {
-                updateStatus(`TOO DARK (${intensity.toFixed(0)}) - ADJUST FINGER`, "#ff9800");
-                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-                drawWave();
-                return; // Skip adding to buffer
+            if(intensity > 245) { // Pushed max limit higher
+                updateStatus("TOO BRIGHT - PRESS HARDER", "#ff9800");
+            } else if(intensity < 15) { // Lowered min limit for dark sensors
+                updateStatus("TOO DARK - LIGHTEN PRESSURE", "#ff9800");
+            } else {
+                updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
+                // Only collect if the signal is within the stable zone
+                if(elapsed > 1000) { 
+                    buffer.push(intensity); 
+                    greenBuffer.push(greenInt); 
+                    fullWaveform.push(intensity.toFixed(2)); 
+                }
             }
             
-            updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
-            
-            // High-Res Capture: 40ms interval = 25Hz sampling (Better for Morphology)
-            if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); fullWaveform.push(intensity.toFixed(2)); }
-            pulseArr.push(intensity); if(pulseArr.length > 125) pulseArr.shift(); // Increased buffer for faster sampling
-            drawWave(); updateBPM();
+            pulseArr.push(intensity); 
+            if(pulseArr.length > 125) pulseArr.shift();
+            drawWave(); 
+            updateBPM();
             
         }, 40); // Increased sampling rate from 100ms to 40ms
     }
