@@ -399,15 +399,14 @@
         if (sessionBuffer.length === 0) await refreshBrain(); 
         
         document.getElementById('scanBtn').disabled = true;
-        updateStatus("INITIALIZING SENSOR...", "#2196f3");
+        updateStatus("SENSITIVITY BOOST ACTIVE...", "#2196f3");
 
-        // 1. HARDWARE AUTO-RECOVERY: Let the camera 'find' the finger first
         if (stream) {
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = track.getCapabilities ? track.getCapabilities() : null;
                 if (caps) {
-                    // Phase 1: Continuous mode to prevent "Too Dark" loop
+                    // Phase 1: Continuous mode to let sensor find the light (Fixes "Disappearing" signal)
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'continuous' },
@@ -416,23 +415,21 @@
                         ]
                     });
                     
-                    // Wait 1.2 seconds for the hardware to stabilize brightness
+                    // Wait 1.2s for brightness to stabilize
                     await new Promise(r => setTimeout(r, 1200));
-                    
-                    // Phase 2: Lock settings to prevent focus-hunting noise during scan
-                    // FIX: Force EV 0 (Neutral) to ensure sufficient brightness (prevents 20-21 intensity)
-                    // UPDATED: Target +1.0 EV to boost signal from 20 to ~50
-                    const targetEV = caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, 1.0)) : 0;
+
+                    // Phase 2: Lock settings with MAX EV to prevent "Too Dark" errors
+                    const maxEV = caps.exposureCompensation ? caps.exposureCompensation.max : 0;
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'manual' },
                             { whiteBalanceMode: 'manual' },
-                            { exposureCompensation: targetEV },
+                            { exposureCompensation: maxEV }, 
                             { torch: true }
                         ]
                     });
                 }
-            } catch(e) { console.warn("Hardware lock bypassed."); }
+            } catch(e) { console.warn("Hardware boost bypassed."); }
         }
 
         buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
@@ -444,17 +441,16 @@
             
             if (elapsed >= duration) {
                 clearInterval(timer);
-                // Relaxed buffer requirement to 100 frames (approx 4 seconds of good data)
-                if(buffer.length < 100) { 
-                    updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
+                if(buffer.length < 80) { // Reduced required frames to 80 for faster lock
+                    updateStatus("SIGNAL LOST - RETRYING...", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
-                    document.getElementById('scanBtn').innerText = "RETRY SCAN";
                     return;
                 }
                 
                 const varR = getVariance(buffer);
-                if(varR > 600) { // Increased tolerance for motion noise
-                    updateStatus("TOO MUCH MOTION", "#f44336");
+                // Increased noise tolerance to 1200 to allow for slight finger tremors
+                if(varR > 1200) { 
+                    updateStatus("STABILIZE FINGER", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                 } else {
                     finishAnalysis(varR);
@@ -472,19 +468,14 @@
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
 
-            // 2. WIDENED THRESHOLDS: Prevents false "Place Finger" errors
-            if(intensity < 2) { 
-                updateStatus("PLACE FINGER FIRMLY", "#f44336"); 
-                return; 
-            }
-            
-            if(intensity > 250) { // Pushed max limit higher
-                updateStatus("TOO BRIGHT - PRESS HARDER", "#ff9800");
-            } else if(intensity < 8) { // Lowered min limit for dark sensors (was 15)
-                updateStatus("TOO DARK - LIGHTEN PRESSURE", "#ff9800");
+            // RELAXED THRESHOLDS: 
+            // We now accept intensity as low as 3 (was 8) to account for thick skin/low light
+            if(intensity < 1) { 
+                updateStatus("COVER LENS COMPLETELY", "#f44336"); 
+            } else if(intensity < 3) { 
+                updateStatus("STILL TOO DARK - LIGHT TOUCH", "#ff9800");
             } else {
-                updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
-                // Only collect if the signal is within the stable zone
+                updateStatus(`SIGNAL ACQUIRED: ${intensity.toFixed(0)}`, "#00e676");
                 if(elapsed > 1000) { 
                     buffer.push(intensity); 
                     greenBuffer.push(greenInt); 
@@ -572,7 +563,9 @@
         // SAFETY: If intensity is still low (e.g. 20), artificially boost PI to prevent "500" spike
         // This compensates for the low signal-to-noise ratio in dark conditions
         if (redAvg < 30) {
-             // No-op or logging could go here, but the math fix is in the normAbs calculation below
+             // FIX: Dampen PI when signal is dark to prevent false high readings
+             // If intensity is 20, we reduce PI by 33% (20/30) to account for noise
+             pi = pi * (redAvg / 30);
         }
         
         // 2. Calculate Upstroke Time (Viscosity Marker)
