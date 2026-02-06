@@ -557,15 +557,15 @@
         
         // 1. Calculate Perfusion Index (Signal Strength)
         const acComponent = Math.sqrt(variance);
-        const pi = (acComponent / redAvg) * 100;
+        let pi = (acComponent / redAvg) * 100;
         document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
         
-        // SAFETY: If intensity is still low (e.g. 20), artificially boost PI to prevent "500" spike
+        // SAFETY: If intensity is still low (e.g. 20-50), artificially boost PI to prevent "500" spike
         // This compensates for the low signal-to-noise ratio in dark conditions
-        if (redAvg < 30) {
+        if (redAvg < 60) {
              // FIX: Dampen PI when signal is dark to prevent false high readings
-             // If intensity is 20, we reduce PI by 33% (20/30) to account for noise
-             pi = pi * (redAvg / 30);
+             // If intensity is 30, we reduce PI by 50% (30/60) to account for noise
+             pi = pi * (redAvg / 60);
         }
         
         // 2. Calculate Upstroke Time (Viscosity Marker)
@@ -596,9 +596,9 @@
         document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
 
         // 3. Autonomous Prediction Formula
-        // FIX: If intensity is low (<30), clamp the PGR multiplier to avoid exploding the result
+        // FIX: If intensity is low (<60), clamp the PGR multiplier to avoid exploding the result
         let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
-        if (redAvg < 30) pgr = 1.0; // Force neutral multiplier in low light
+        if (redAvg < 60 || greenAvg < 10) pgr = 1.0; // Force neutral multiplier in low light
         
         const normAbs = pi * (pgr / 2.5);
         
