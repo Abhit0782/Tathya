@@ -677,7 +677,7 @@
     } else if (syncCount >= 20) {
         statusText = "🔒 AUTONOMOUS MODE";
         statusColor = "var(--accent)";
-        syncCard.style.display = "none"; // Hide sync input in autonomous mode
+        syncCard.style.display = "block"; // FIX: Always allow syncing to correct offsets
     }
 
     document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
