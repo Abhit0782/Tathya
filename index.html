@@ -155,7 +155,7 @@
         bInt: 220, 
         syncCount: 0, 
         finalAccuracyPercent: 0,
-        coefA: 88.38, coefB: -84.54, intercept: 154.21, // Updated for Fast-Learn
+        coefA: 12.5, coefB: 45.0, intercept: 65.0,
         personalOffset: 0,
         sensitivityScale: 1.0
     };
@@ -566,23 +566,29 @@
 
         // 2. Calculate Upstroke Time (Viscosity Marker)
         // We analyze the 'fullWaveform' to find the time from trough to peak.
-        let upstrokeFrames = 0;
-        if (fullWaveform.length > 10) {
-            // Simple peak-finding logic for the last detected pulse
-            let lastTrough = 0, lastPeak = 0;
-            for (let i = fullWaveform.length - 2; i > 0; i--) {
+        // NEW PROTECTED UPSTROKE LOGIC
+        let upstrokeTime = 120; // Default fallback
+        if (fullWaveform.length > 20) {
+            let lastTrough = -1, lastPeak = -1;
+            // Find last valid trough/peak pair in the signal
+            for (let i = fullWaveform.length - 5; i > 1; i--) {
                 if (fullWaveform[i] < fullWaveform[i-1] && fullWaveform[i] < fullWaveform[i+1]) {
                     lastTrough = i; break;
                 }
             }
-            for (let j = lastTrough; j < fullWaveform.length - 1; j++) {
-                if (fullWaveform[j] > fullWaveform[j-1] && fullWaveform[j] > fullWaveform[j+1]) {
-                    lastPeak = j; break;
+            if (lastTrough > 0) {
+                for (let j = lastTrough; j < fullWaveform.length - 1; j++) {
+                    if (fullWaveform[j] > fullWaveform[j-1] && fullWaveform[j] > fullWaveform[j+1]) {
+                        lastPeak = j;
+                        break;
+                    }
                 }
             }
-            upstrokeFrames = (lastPeak - lastTrough) * 40; // 40ms per frame
+            // Only update if we found a valid positive time gap
+            if (lastPeak > lastTrough && lastTrough !== -1) {
+                upstrokeTime = Math.min(240, Math.max(60, (lastPeak - lastTrough) * 40)); 
+            }
         }
-        const upstrokeTime = upstrokeFrames || 120; // Default to 120ms if undetected
         document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
 
         // 3. Autonomous Prediction Formula
