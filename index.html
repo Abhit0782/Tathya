@@ -1,7 +1,5 @@
 <!DOCTYPE html>
 <html>
-<head><!DOCTYPE html>
-<html>
 <head>
     <title>Tathya </title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -58,6 +56,7 @@
         <div id="nameSection">
             <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
             <input type="text" id="userName" class="modal-input" placeholder="User Name">
+            <input type="number" id="userHbA1c" class="modal-input" placeholder="HbA1c (Optional, e.g. 5.7)" step="0.1">
             <button onclick="startEnrollmentProcess()" class="btn-main">CONTINUE</button>
         </div>
         <div id="fingerSection" style="display:none;">
@@ -143,6 +142,7 @@
     let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
     let sessionBuffer = []; // Stores scans for "Best of 5" logic
+    let fullWaveform = []; // Store high-res waveform for AI training
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
     
     const defaultCal = { 
@@ -295,7 +295,8 @@
 
     function finishEnrollment() {
         const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), type: "ENROLLMENT" };
+        const hba1c = document.getElementById('userHbA1c').value.trim();
+        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), hba1c: hba1c, type: "ENROLLMENT" };
         localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
         pushToCloud(enrollmentData);
         document.getElementById('enrollModal').classList.remove('visible');
@@ -309,7 +310,9 @@
 
         if (isRevived) {
             // User exists in cloud. Skip finger scanning.
-            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
+            // Preserve local HbA1c if entered, else try to keep existing
+            const hba1c = document.getElementById('userHbA1c').value.trim();
+            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt, hba1c: hba1c };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
             document.getElementById('enrollModal').classList.remove('visible');
         } else {
@@ -413,7 +416,7 @@
 
         document.getElementById('scanBtn').disabled = true;
         
-        buffer = []; pulseArr = []; greenBuffer = [];
+        buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
         let start = Date.now();
         const duration = 10000;
 
@@ -470,11 +473,12 @@
             
             updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
             
-            if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); }
-            pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
+            // High-Res Capture: 40ms interval = 25Hz sampling (Better for Morphology)
+            if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); fullWaveform.push(intensity.toFixed(2)); }
+            pulseArr.push(intensity); if(pulseArr.length > 125) pulseArr.shift(); // Increased buffer for faster sampling
             drawWave(); updateBPM();
             
-        }, 100);
+        }, 40); // Increased sampling rate from 100ms to 40ms
     }
 
     function updateBPM() {
@@ -507,9 +511,9 @@
     function drawWave() {
         pCtx.clearRect(0,0, pGraph.width, pGraph.height);
         pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
-        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
+        const max = Math.max(...pulseArr) || 100, min = Math.min(...pulseArr) || 0, range = max - min || 1;
         pulseArr.forEach((p, i) => {
-            const x = (i / 50) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
+            const x = (i / 125) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
             if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
         });
         pCtx.stroke();
@@ -552,8 +556,17 @@
         let val = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept + (cal.personalOffset || 0);
         val = Math.round(Math.max(40, Math.min(500, val)));
 
-        // 5. Batch Logic Management
-        sessionBuffer.push({ val: val, abs: normAbs, raw: redAvg, var: variance });
+        // 5. Implicit HbA1c Anchor (Medical Weighting)
+        // If user provided HbA1c, we use it to stabilize the reading towards their Estimated Average Glucose (eAG).
+        // eAG = 28.7 * HbA1c - 46.7
+        if (enrollmentData.hba1c && !isNaN(enrollmentData.hba1c)) {
+            const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
+            // Apply 15% weight to the long-term average to reduce variance
+            val = Math.round((val * 0.85) + (eAG * 0.15));
+        }
+
+        // 6. Batch Logic Management
+        sessionBuffer.push({ val: val, abs: normAbs, raw: redAvg, var: variance, wave: fullWaveform });
         const count = sessionBuffer.length;
 
         if (count < 5) {
@@ -571,6 +584,7 @@
         const finalAbs = sessionBuffer[0].abs;
         const finalRaw = sessionBuffer[0].raw;
         const finalNoise = sessionBuffer[0].var; // Get the noise from the most stable scan
+        const finalWave = sessionBuffer[0].wave; // Capture the best waveform
 
         document.getElementById('gluResult').innerText = finalVal;
         updateStatus("ANALYSIS COMPLETE", "#2196f3");
@@ -585,7 +599,9 @@
             noise: finalNoise.toFixed(2),
             finger: currentFinger,
             absorbance: finalAbs.toFixed(4),
-            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset
+            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset,
+            hba1c: enrollmentData.hba1c || "",
+            waveform: finalWave.join(",") // Send full waveform for Deep Learning
         };
 
         history.unshift(logEntry);
@@ -651,7 +667,7 @@
     }
 
     function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline };
+        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline, hba1c: enrollmentData?.hba1c };
         fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
     }
 
@@ -727,728 +743,3 @@
 </script>
 </body>
 </html>
-    <title>Tathya </title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <link rel="manifest" href="manifest.json">
-    <style>
-        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
-        
-        /* Identity Enrollment UI */
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
-        #enrollModal.visible { display: flex; }
-        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; font-size: 16px; text-align: center; }
-        
-        .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
-        #v_enroll { width: 100%; height: 100%; object-fit: cover; }
-        
-        /* Controls & Rings */
-        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
-        .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
-        .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
-        .progress-ring__track { stroke: #222; }
-        
-        .inner-display { position: absolute; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
-        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
-        
-        /* Fixed Pulse Graph in Center */
-        #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 20px; z-index: 5; pointer-events: none; }
-        
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 10; position: relative; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
-        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 10; margin-top: -5px; }
-        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 10; margin-bottom: 5px; }
-
-        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
-        .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
-        .btn-small.active { background: #ffa000; color: #000; border-color: #ffa000; }
-        
-        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
-        .btn-main:disabled { background: #222; color: #444; }
-
-        .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
-        #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
-        
-        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; box-sizing: border-box; }
-        #trendCanvas { width: 100%; height: 100px; }
-        
-        .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
-        .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
-    </style>
-</head>
-<body>
-
-    <div id="enrollModal">
-        <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
-        <div id="nameSection">
-            <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
-            <input type="text" id="userName" class="modal-input" placeholder="User Name">
-            <button onclick="startEnrollmentProcess()" class="btn-main">CONTINUE</button>
-        </div>
-        <div id="fingerSection" style="display:none;">
-            <div class="enroll-box">
-                <video id="v_enroll" autoplay playsinline muted></video>
-                <div id="enrollCounter" style="position:absolute; font-size:40px; font-weight:900; color:var(--accent);"></div>
-            </div>
-            <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; letter-spacing:1px; margin-bottom:5px;">LEFT THUMB</div>
-            <div class="controls" style="margin-bottom:10px;">
-                <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-                <button class="btn-small" id="enrollFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
-            </div>
-            <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
-        </div>
-    </div>
-
-    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
-    
-    <div style="margin: 10px 0;">
-        <select id="fingerSelector" onchange="changeFinger()" style="background: #111; color: #fff; padding: 8px; border-radius: 8px; border: 1px solid #333; width: 200px; text-align: center; font-weight: bold;">
-            <option value="Left Thumb">Left Thumb</option>
-            <option value="Left Index" selected>Left Index</option>
-            <option value="Left Middle">Left Middle</option>
-            <option value="Left Ring">Left Ring</option>
-            <option value="Left Pinky">Left Pinky</option>
-            <option value="Right Thumb">Right Thumb</option>
-            <option value="Right Index">Right Index</option>
-            <option value="Right Middle">Right Middle</option>
-            <option value="Right Ring">Right Ring</option>
-            <option value="Right Pinky">Right Pinky</option>
-        </select>
-    </div>
-
-    <div class="bio-ring-container">
-        <svg class="progress-ring" width="280" height="280">
-            <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-            <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-        </svg>
-        <div class="inner-display">
-            <video id="v" autoplay playsinline muted></video>
-            <div id="timer" class="timer-text">--</div>
-            <div id="gluResult" class="result-text">--</div>
-            <div class="unit-text">mg/dL</div>
-            <div id="sigStatus" style="font-size:10px; color:#888; position:absolute; top:60px; font-weight:bold; letter-spacing:1px;">READY</div>
-            <div id="bpmVal" style="font-size:14px; color:#f44336; position:absolute; top:80px; font-weight:bold;">-- BPM</div>
-            <canvas id="pulseGraph"></canvas>
-        </div>
-    </div>
-
-    <div class="controls">
-        <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-        <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
-    </div>
-
-    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START SMART SCAN</button>
-    <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div style="font-size:10px; color:#666; margin-top:5px; display:flex; justify-content:space-between; width:100%; max-width:400px; align-items:center;">
-        <span id="calText">DATABASE SYNC PROGRESS</span>
-        <span id="statusMsg" style="font-weight:bold;"></span>
-    </div>
-
-    <div class="trend-card">
-        <span style="font-size: 11px; color: var(--blue); font-weight: bold;">GLUCOSE TREND</span>
-        <canvas id="trendCanvas"></canvas>
-    </div>
-
-    <div class="card" id="syncCard">
-        <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
-        <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
-    </div>
-
-    <div id="historyLog" class="card"></div>
-    <button onclick="hardReset()" style="margin-top:20px; background:transparent; border:1px solid #333; color:#555; padding:10px; border-radius:8px; font-size:10px;">FACTORY RESET APP</button>
-    <canvas id="c" width="50" height="50" style="display:none;"></canvas>
-
-<script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
-
-    const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
-    const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
-    const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
-    
-    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
-    let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
-    let sessionBuffer = []; // Stores scans for "Best of 5" logic
-    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
-    
-    const defaultCal = { 
-        bInt: 220, 
-        syncCount: 0, 
-        finalAccuracyPercent: 0,
-        coefA: 88.38, coefB: -84.54, intercept: 154.21, // Updated for Fast-Learn
-        personalOffset: 0,
-        sensitivityScale: 1.0
-    };
-
-    // Helper to sanitize calibration data (Fixes NaN and migrates old profiles)
-    function sanitizeCal(c) {
-        if (!c) return null;
-        // Inject missing coefficients if migrating from old version
-        if (c.coefA == null || isNaN(c.coefA)) c.coefA = defaultCal.coefA;
-        if (c.coefB == null || isNaN(c.coefB)) c.coefB = defaultCal.coefB;
-        if (c.intercept == null || isNaN(c.intercept)) c.intercept = defaultCal.intercept;
-        // Fix NaN corruption
-        if (isNaN(c.personalOffset)) c.personalOffset = 0;
-        if (isNaN(c.bInt) || c.bInt <= 0) c.bInt = 220;
-        return c;
-    }
-
-    let cal = sanitizeCal(fingerProfiles[currentFinger]) || sanitizeCal(JSON.parse(localStorage.getItem('tathya_cal'))) || JSON.parse(JSON.stringify(defaultCal));
-    let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
-    let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
-    
-    const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
-    let currentFingerIdx = 0, enrollTempData = [];
-
-    async function init() {
-        // ... existing camera setup ...
-        if(enrollmentData) {
-            await refreshIntelligence(); // Force check DB on startup
-        }
-
-        try {
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera();
-            if(!enrollmentData) {
-                document.getElementById('enrollModal').classList.add('visible');
-            } else {
-                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
-            }
-            
-            // Initialize Finger UI
-            document.getElementById('fingerSelector').value = currentFinger;
-            if (!fingerProfiles[currentFinger]) {
-                // If this finger has no profile, init it with current cal or default
-                fingerProfiles[currentFinger] = cal;
-            }
-            
-            updateUI(); drawTrend(); renderLog();
-        } catch(e) { alert("Camera Permission Required"); }
-    }
-
-    // Add this function to fetch intelligence before every scan or on startup
-    async function refreshIntelligence() {
-        if(!enrollmentData) return;
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
-            });
-            const cloudBrain = await resp.json();
-            
-            // Overwrite local calibration with DB truth
-            cal.coefA = cloudBrain.coefA;
-            cal.coefB = cloudBrain.coefB;
-            cal.intercept = cloudBrain.intercept;
-            cal.personalOffset = cloudBrain.personalOffset;
-            cal.syncCount = cloudBrain.syncCount;
-            
-            console.log("Brain refreshed from DB. Sync Level:", cal.syncCount);
-            updateUI();
-        } catch(e) { console.error("Cloud check failed, using last known state."); }
-    }
-
-    async function setupCamera() {
-        if(stream) { stream.getTracks().forEach(t => t.stop()); }
-        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream;
-        ve.srcObject = stream;
-    }
-
-    async function toggleFlash() {
-        if(!stream) return;
-        const track = stream.getVideoTracks()[0];
-        try {
-            torch = !torch;
-            await track.applyConstraints({ advanced: [{ torch: torch }] });
-            document.getElementById('mainFlashBtn').classList.toggle('active', torch);
-            document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
-        } catch(e) { alert("Flash not supported on this lens."); torch = false; }
-    }
-
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
-    }
-
-    function changeFinger() {
-        // Save current profile before switching
-        fingerProfiles[currentFinger] = cal;
-        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
-        
-        // Switch to new finger
-        currentFinger = document.getElementById('fingerSelector').value;
-        localStorage.setItem('tathya_current_finger', currentFinger);
-        sessionBuffer = []; // Reset batch logic when changing fingers
-        
-        // Load new profile (or create default if not exists)
-        if (!fingerProfiles[currentFinger]) {
-            fingerProfiles[currentFinger] = JSON.parse(JSON.stringify(defaultCal));
-        }
-        cal = sanitizeCal(fingerProfiles[currentFinger]);
-        
-        // Update Global Cal for backward compatibility
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        updateUI();
-    }
-
-    function startEnrollStep() {
-        if(!torch) return alert("Turn on FLASH.");
-        document.getElementById('enrollBtn').disabled = true;
-        let start = Date.now(), stepBuffer = [];
-        const timer = setInterval(() => {
-            let elapsed = Date.now() - start;
-            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
-            ctx.drawImage(ve, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
-            stepBuffer.push(r / (pix.length/4));
-            if(elapsed >= 5000) {
-                clearInterval(timer);
-                enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: (stepBuffer.reduce((a,b)=>a+b,0)/stepBuffer.length) });
-                currentFingerIdx++;
-                if(currentFingerIdx < 10) {
-                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
-                    document.getElementById('enrollCounter').innerText = "";
-                    document.getElementById('enrollBtn').disabled = false;
-                } else { finishEnrollment(); }
-            }
-        }, 100);
-    }
-
-    function finishEnrollment() {
-        const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), type: "ENROLLMENT" };
-        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-        pushToCloud(enrollmentData);
-        document.getElementById('enrollModal').classList.remove('visible');
-        if(torch) toggleFlash();
-    }    
-    async function startEnrollmentProcess() {
-        const name = document.getElementById('userName').value.trim();
-        if(!name) return alert("Please enter your name.");
-        
-        const isRevived = await reviveFromCloud(name, true); // `true` = show alert on success
-
-        if (isRevived) {
-            // User exists in cloud. Skip finger scanning.
-            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt };
-            localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-            document.getElementById('enrollModal').classList.remove('visible');
-        } else {
-            // New user. Proceed to finger scanning.
-            document.getElementById('nameSection').style.display = "none";
-            document.getElementById('fingerSection').style.display = "block";
-        }
-    }
-
-  async function reviveFromCloud(name, showAlert) {
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                redirect: "follow",
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
-            });
-            const cloudData = await resp.json();
-            if (cloudData && cloudData.syncCount > 0) {
-                // Switched to new non-linear model from the cloud
-                cal.coefA = cloudData.coefA;
-                cal.coefB = cloudData.coefB;
-                cal.intercept = cloudData.intercept;
-                cal.personalOffset = cloudData.personalOffset;
-                cal.syncCount = cloudData.syncCount;
-                cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
-                saveCal(); // Save to both global and finger profile
-                updateUI();
-                if (showAlert) {
-                    alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
-                }
-                return true;
-            }
-            return false;
-        } catch(e) {
-            console.log("New user or offline mode. Starting fresh.");
-            return false;
-        }
-    }
-
-    // Add this helper to find the ideal exposure based on past successful syncs
-    function getIdealExposure() {
-        // If we have high accuracy (>90%) and a syncCount > 5, 
-        // we use the 'bInt' (baseline intensity) from those successful syncs.
-        if (cal.syncCount > 5 && cal.finalAccuracyPercent > 90) {
-            // Optimization: If current light is too high, lower compensation
-            return -2.0; // Force lower exposure for high-end sensors like OnePlus 12
-        }
-        return -1.0; // Default slight underexposure for PPG
-    }
-
-    // Global function to pull the latest brain from the cloud
-    async function refreshBrain() {
-        if(!enrollmentData) return;
-        updateStatus("SYNCING BRAIN...", "#ffa000");
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
-            });
-            const brain = await resp.json();
-            
-            // Strictly use DB coefficients
-            cal.coefA = brain.coefA;
-            cal.coefB = brain.coefB;
-            cal.intercept = brain.intercept;
-            cal.personalOffset = brain.personalOffset;
-            cal.syncCount = brain.syncCount;
-            
-            updateUI();
-            console.log(`Brain Mode: ${brain.status} | Syncs: ${cal.syncCount}`);
-        } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
-    }
-
-    async function runAnalysis() {
-        if(!torch) return alert("Enable Flash.");
-        // OPTIMIZATION: Only fetch brain on the first scan of the batch to reduce latency
-        if (sessionBuffer.length === 0) await refreshBrain(); 
-        
-        // FIX: Restore Hardware Lock with safe defaults (-2 EV) to prevent "Too Dark" or "Too Bright" loops
-        if (stream) {
-            try {
-                const track = stream.getVideoTracks()[0];
-                const caps = track.getCapabilities ? track.getCapabilities() : null;
-                if (caps) {
-                    const constraints = {
-                        advanced: [
-                            { exposureMode: 'manual' }, 
-                            // Target -2.0 EV for OnePlus 12 stability (Low Light Mode)
-                            { exposureCompensation: caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, -2.0) : -2.0 },
-                            { iso: caps.iso ? caps.iso.min : 50 },
-                            { whiteBalanceMode: 'manual' },
-                            { torch: true } 
-                        ]
-                    };
-                    await track.applyConstraints(constraints);
-                }
-            } catch(e) { console.warn("Hardware lock ignored by browser.", e); }
-        }
-
-        document.getElementById('scanBtn').disabled = true;
-        
-        buffer = []; pulseArr = []; greenBuffer = [];
-        let start = Date.now();
-        const duration = 10000;
-
-        const timer = setInterval(() => {
-            const elapsed = Date.now() - start;
-            
-            // MOVED CHECK UP: Ensure scan finishes even if signal is bad (prevents "stuck" app)
-            if (elapsed >= duration) {
-                clearInterval(timer);
-                
-                if(buffer.length < 30) {
-                    updateStatus("SCAN FAILED - POOR SIGNAL", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                    document.getElementById('scanBtn').innerText = "RETRY SCAN";
-                    return;
-                }
-                
-                const varR = getVariance(buffer);
-                if(varR > 400) {
-                    updateStatus("TOO MUCH MOTION", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                } else {
-                    finishAnalysis(varR);
-                }
-                return; // Stop execution of this interval iteration
-            }
-
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
-            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
-            
-            ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
-            
-            let intensity = r / (pix.length/4);
-            let greenInt = g / (pix.length/4);
-
-            if(intensity < 5) { updateStatus("PLACE FINGER FIRMLY", "#f44336"); return; }
-            
-            if(intensity > 95) {
-                updateStatus(`TOO BRIGHT (${intensity.toFixed(0)}) - PRESS HARDER`, "#ff9800");
-                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-                drawWave();
-                return; // Skip adding to buffer
-            }
-            
-            // NEW: Prevent collection if too dark (Signal < 40 is unreliable)
-            if(intensity < 40) {
-                updateStatus(`TOO DARK (${intensity.toFixed(0)}) - ADJUST FINGER`, "#ff9800");
-                pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-                drawWave();
-                return; // Skip adding to buffer
-            }
-            
-            updateStatus(`COLLECTING... INT: ${intensity.toFixed(0)}`, "#00e676");
-            
-            if(elapsed > 1500) { buffer.push(intensity); greenBuffer.push(greenInt); }
-            pulseArr.push(intensity); if(pulseArr.length > 50) pulseArr.shift();
-            drawWave(); updateBPM();
-            
-        }, 100);
-    }
-
-    function updateBPM() {
-        if(pulseArr.length < 40) return;
-        
-        // Bandpass Filter (0.5Hz - 4.0Hz) for clean AC component
-        // 1. High Pass (DC Removal)
-        let hp = [], alpha = 0.85;
-        hp[0] = 0;
-        for(let i=1; i<pulseArr.length; i++) {
-            hp[i] = alpha * (hp[i-1] + pulseArr[i] - pulseArr[i-1]);
-        }
-        
-        // 2. Low Pass (Smoothing)
-        let smooth = [];
-        for(let i=1; i<hp.length-1; i++) {
-            smooth.push((hp[i-1] + hp[i] + hp[i+1]) / 3);
-        }
-        
-        // Count peaks (local maxima above mean)
-        let peaks = 0, mean = smooth.reduce((a,b)=>a+b,0)/smooth.length;
-        for(let i=1; i<smooth.length-1; i++) {
-            if(smooth[i] > mean && smooth[i] > smooth[i-1] && smooth[i] > smooth[i+1]) peaks++;
-        }
-        // 50 frames @ 100ms = 5 seconds. BPM = peaks * (60/5) = peaks * 12
-        let bpm = peaks * 12;
-        if(bpm > 50 && bpm < 180) document.getElementById('bpmVal').innerText = bpm + " ♥";
-    }
-
-    function drawWave() {
-        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
-        const max = Math.max(...pulseArr), min = Math.min(...pulseArr), range = max - min || 1;
-        pulseArr.forEach((p, i) => {
-            const x = (i / 50) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
-            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
-        });
-        pCtx.stroke();
-    }
-
-    function updateStatus(msg, color) {
-        const el = document.getElementById('sigStatus');
-        el.innerText = msg; el.style.color = color;
-    }
-
-    function getVariance(arr) {
-        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-        return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
-    }
-
-    function finishAnalysis(variance) {
-        const redAvg = buffer.reduce((a,b)=>a+b,0)/buffer.length;
-        const greenAvg = greenBuffer.reduce((a,b)=>a+b,0)/greenBuffer.length;
-        
-        // 1. Dynamic Baseline (from Enrollment or Default)
-        const base = parseFloat(enrollmentData?.baseline) || 220;
-        
-        // 2. Absorbance Calculation (AC/DC Method)
-        // We use the Perfusion Index (AC / DC) to decouple the reading from raw light intensity.
-        // This prevents "Brighter = Higher Result" errors.
-        const acComponent = Math.sqrt(variance); // Standard Deviation represents Pulse Energy (AC)
-        const perfusionIndex = acComponent / redAvg; // Normalized Ratio (AC/DC)
-        let rawAbs = perfusionIndex * 100; // Scale PI (typically 0.01) to Model Range (~1.0)
-        
-        rawAbs = Math.min(3.0, Math.max(0.1, rawAbs)); // Safety Clamp
-        
-        // 3. Pressure Compensation (PGR)
-        let pgr = greenAvg > 0 ? (redAvg / greenAvg) : 2.5;
-        // FIX: Clamp PGR to prevent outliers (valid range typically 1.0 - 3.5)
-        pgr = Math.max(1.0, Math.min(3.5, pgr));
-        
-        const normAbs = rawAbs * (pgr / 2.5);
-
-        // 4. Prediction using Quadratic Brain
-        let val = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept + (cal.personalOffset || 0);
-        val = Math.round(Math.max(40, Math.min(500, val)));
-
-        // 5. Batch Logic Management
-        sessionBuffer.push({ val: val, abs: normAbs, raw: redAvg, var: variance });
-        const count = sessionBuffer.length;
-
-        if (count < 5) {
-            document.getElementById('gluResult').innerText = val;
-            updateStatus(`WARMUP ${count}/5 - AUTO STARTING...`, "#ffa000");
-            document.getElementById('scanBtn').disabled = true;
-            document.getElementById('scanBtn').innerText = `AUTO SCAN (${count}/5)`;
-            setTimeout(runAnalysis, 1500); // Automatically start next scan after 1.5s
-            return; 
-        }
-
-        // Final Process (End of Batch)
-        sessionBuffer.sort((a,b) => a.var - b.var);
-        const finalVal = Math.round(sessionBuffer.slice(0,3).reduce((s,i)=>s+i.val, 0)/3);
-        const finalAbs = sessionBuffer[0].abs;
-        const finalRaw = sessionBuffer[0].raw;
-        const finalNoise = sessionBuffer[0].var; // Get the noise from the most stable scan
-
-        document.getElementById('gluResult').innerText = finalVal;
-        updateStatus("ANALYSIS COMPLETE", "#2196f3");
-        
-        const logEntry = { 
-            name: enrollmentData.name, 
-            time: new Date().toLocaleTimeString(), 
-            val: finalVal, 
-            raw: finalRaw.toFixed(2), 
-            actual: "--", 
-            type: "BATCH_SCAN", 
-            noise: finalNoise.toFixed(2),
-            finger: currentFinger,
-            absorbance: finalAbs.toFixed(4),
-            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset
-        };
-
-        history.unshift(logEntry);
-        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
-        pushToCloud(logEntry);
-        
-        sessionBuffer = [];
-        document.getElementById('scanBtn').disabled = false;
-        document.getElementById('scanBtn').innerText = "START SMART SCAN";
-        renderLog(); drawTrend();
-    }
-
-    function syncCal() {
-        const actual = parseFloat(document.getElementById('meterVal').value);
-        if(!actual || history.length < 1) return alert("Scan first, then enter meter value to sync.");
-        
-        const lastScan = history[0];
-        if (lastScan.absorbance === undefined) {
-            return alert("The last scan was made with an old app version. Please perform a new scan before syncing.");
-        }
-        const abs = parseFloat(lastScan.absorbance);
-        if (isNaN(abs)) return alert("Invalid scan data. Please rescan.");
-        
-        // Calculate what the model predicted WITHOUT the personal offset
-        const modelPrediction = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        
-        // The "Learning": The difference between the meter and our model's prediction is the new offset
-        const newOffset = actual - modelPrediction;
-
-        // Smoothly update the personal offset using a weighted average (Adaptive Learning Rate)
-        cal.personalOffset = cal.personalOffset || 0;
-        // CHANGED: Use fixed learning rate (0.3) so recent data always has 30% impact
-        const learningRate = 0.3; 
-        cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
-        cal.syncCount = (cal.syncCount || 0) + 1;
-
-        // --- Update local state and UI (re-integrated from previous version for consistency) ---
-        history[0].actual = actual;
-
-        // Update Local Accuracy Estimate
-        const predictedVal = parseFloat(lastScan.val);
-        const currentError = Math.abs(predictedVal - actual) / actual;
-        const currentAcc = Math.max(0, 100 - (currentError * 100));
-        const prevCount = cal.syncCount - 1;
-        const currentAvg = cal.finalAccuracyPercent || 0;
-        cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
-
-        saveCal(); // Persist the updated 'cal' object for the current finger
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
-        
-        // Push the complete sync record to the cloud
-        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset, coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept });
-        
-        updateUI(); 
-        renderLog(); 
-        alert("Biological Profile Updated. Accuracy is increasing!");
-    }
-
-    function saveCal() {
-        fingerProfiles[currentFinger] = cal;
-        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-    }
-
-    function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline };
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
-    }
-
-    function updateUI() {
-    const syncCount = cal.syncCount || 0;
-    const syncBar = document.getElementById('calBar');
-    const syncCard = document.getElementById('syncCard');
-    
-    // Calculate Confidence based on Sync Milestones
-    // 0 syncs = 5%, 20 syncs = 100%
-    let confidence = Math.min(100, Math.max(5, (syncCount / 20) * 100));
-    
-    // If we have local accuracy data, factor it in
-    if (cal.finalAccuracyPercent > 0) {
-        confidence = (confidence + cal.finalAccuracyPercent) / 2;
-    }
-
-    syncBar.style.width = confidence + "%";
-    
-    let statusText = "LEARNING (SYNC " + syncCount + "/20)";
-    let statusColor = "#ffa000";
-
-    if (syncCount >= 5 && syncCount < 15) {
-        statusText = "STABILIZING BIOMETRICS";
-        statusColor = "#2196f3";
-    } else if (syncCount >= 15 && syncCount < 20) {
-        statusText = "HIGH CONFIDENCE";
-        statusColor = "var(--accent)";
-    } else if (syncCount >= 20) {
-        statusText = "🔒 AUTONOMOUS MODE";
-        statusColor = "var(--accent)";
-        syncCard.style.display = "block"; // FIX: Always allow syncing to correct offsets
-    }
-
-    document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
-    document.getElementById('statusMsg').innerText = statusText;
-    document.getElementById('statusMsg').style.color = statusColor;
-}
-
-    function hardReset() {
-        if(confirm("This will wipe all data and reset the app. Continue?")) {
-            localStorage.clear();
-            if('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                    for(let registration of registrations) { registration.unregister(); }
-                });
-            }
-            location.reload();
-        }
-    }
-
-    function drawTrend() {
-        if(history.length < 2) return;
-        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
-        const data = [...history].reverse(), vals = data.map(h => h.val);
-        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
-        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
-        data.forEach((h, i) => {
-            const x = (i / (data.length - 1)) * tCanvas.width, y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
-            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
-        });
-        tCtx.stroke();
-    }
-
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
-    
-    // Register Service Worker for PWA
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js');
-    }
-
-    window.onload = init;
-</script>
-</body>
-</html>
-
