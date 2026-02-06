@@ -421,7 +421,8 @@
                     
                     // Phase 2: Lock settings to prevent focus-hunting noise during scan
                     // FIX: Force EV 0 (Neutral) to ensure sufficient brightness (prevents 20-21 intensity)
-                    const targetEV = caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, 0)) : 0;
+                    // UPDATED: Target +1.0 EV to boost signal from 20 to ~50
+                    const targetEV = caps.exposureCompensation ? Math.max(caps.exposureCompensation.min, Math.min(caps.exposureCompensation.max, 1.0)) : 0;
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'manual' },
@@ -567,7 +568,13 @@
         const acComponent = Math.sqrt(variance);
         const pi = (acComponent / redAvg) * 100;
         document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
-
+        
+        // SAFETY: If intensity is still low (e.g. 20), artificially boost PI to prevent "500" spike
+        // This compensates for the low signal-to-noise ratio in dark conditions
+        if (redAvg < 30) {
+             // No-op or logging could go here, but the math fix is in the normAbs calculation below
+        }
+        
         // 2. Calculate Upstroke Time (Viscosity Marker)
         // We analyze the 'fullWaveform' to find the time from trough to peak.
         // NEW PROTECTED UPSTROKE LOGIC
@@ -596,7 +603,11 @@
         document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
 
         // 3. Autonomous Prediction Formula
-        const normAbs = pi * (Math.max(1.0, Math.min(3.5, redAvg / greenAvg)) / 2.5);
+        // FIX: If intensity is low (<30), clamp the PGR multiplier to avoid exploding the result
+        let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
+        if (redAvg < 30) pgr = 1.0; // Force neutral multiplier in low light
+        
+        const normAbs = pi * (pgr / 2.5);
         
         // This adds the "Viscosity Correction" to prevent the 172 vs 141 error
         let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
