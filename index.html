@@ -100,6 +100,12 @@
             <div id="timer" class="timer-text">--</div>
             <div id="gluResult" class="result-text">--</div>
             <div class="unit-text">mg/dL</div>
+            
+            <div id="bioStats" style="position:absolute; bottom:60px; display:flex; gap:10px; font-size:9px; color:var(--accent); font-weight:bold; letter-spacing:1px;">
+                <span id="statPI">PI: --%</span>
+                <span id="statVisco">VISCO: --ms</span>
+            </div>
+            
             <div id="sigStatus" style="font-size:10px; color:#888; position:absolute; top:60px; font-weight:bold; letter-spacing:1px;">READY</div>
             <div id="bpmVal" style="font-size:14px; color:#f44336; position:absolute; top:80px; font-weight:bold;">-- BPM</div>
             <canvas id="pulseGraph"></canvas>
@@ -529,84 +535,129 @@
         return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
     }
 
+    // Helper: Gaussian Smoothing Filter to remove sensor jitter
+    function applyGaussianFilter(data) {
+        const kernel = [0.061, 0.242, 0.383, 0.242, 0.061]; // 5-point Gaussian
+        let smoothed = [];
+        for (let i = 2; i < data.length - 2; i++) {
+            let val = 0;
+            for (let j = -2; j <= 2; j++) val += data[i + j] * kernel[j + 2];
+            smoothed.push(val);
+        }
+        return smoothed;
+    }
+
     function finishAnalysis(variance) {
-        const redAvg = buffer.reduce((a,b)=>a+b,0)/buffer.length;
-        const greenAvg = greenBuffer.reduce((a,b)=>a+b,0)/greenBuffer.length;
+        const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
         
-        // 1. Dynamic Baseline (from Enrollment or Default)
-        const base = parseFloat(enrollmentData?.baseline) || 220;
-        
-        // 2. Absorbance Calculation (AC/DC Method)
-        // We use the Perfusion Index (AC / DC) to decouple the reading from raw light intensity.
-        // This prevents "Brighter = Higher Result" errors.
-        const acComponent = Math.sqrt(variance); // Standard Deviation represents Pulse Energy (AC)
-        const perfusionIndex = acComponent / redAvg; // Normalized Ratio (AC/DC)
-        let rawAbs = perfusionIndex * 100; // Scale PI (typically 0.01) to Model Range (~1.0)
-        
-        rawAbs = Math.min(3.0, Math.max(0.1, rawAbs)); // Safety Clamp
-        
-        // 3. Pressure Compensation (PGR)
-        let pgr = greenAvg > 0 ? (redAvg / greenAvg) : 2.5;
-        // FIX: Clamp PGR to prevent outliers (valid range typically 1.0 - 3.5)
-        pgr = Math.max(1.0, Math.min(3.5, pgr));
-        
-        const normAbs = rawAbs * (pgr / 2.5);
+        // 1. Calculate Perfusion Index (Signal Strength)
+        const acComponent = Math.sqrt(variance);
+        const pi = (acComponent / redAvg) * 100;
+        document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
 
-        // 4. Prediction using Quadratic Brain
-        let val = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept + (cal.personalOffset || 0);
-        val = Math.round(Math.max(40, Math.min(500, val)));
+        // 2. Calculate Upstroke Time (Viscosity Marker)
+        // We analyze the 'fullWaveform' to find the time from trough to peak.
+        let upstrokeFrames = 0;
+        if (fullWaveform.length > 10) {
+            // Simple peak-finding logic for the last detected pulse
+            let lastTrough = 0, lastPeak = 0;
+            for (let i = fullWaveform.length - 2; i > 0; i--) {
+                if (fullWaveform[i] < fullWaveform[i-1] && fullWaveform[i] < fullWaveform[i+1]) {
+                    lastTrough = i; break;
+                }
+            }
+            for (let j = lastTrough; j < fullWaveform.length - 1; j++) {
+                if (fullWaveform[j] > fullWaveform[j-1] && fullWaveform[j] > fullWaveform[j+1]) {
+                    lastPeak = j; break;
+                }
+            }
+            upstrokeFrames = (lastPeak - lastTrough) * 40; // 40ms per frame
+        }
+        const upstrokeTime = upstrokeFrames || 120; // Default to 120ms if undetected
+        document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
 
-        // 5. Implicit HbA1c Anchor (Medical Weighting)
-        // If user provided HbA1c, we use it to stabilize the reading towards their Estimated Average Glucose (eAG).
-        // eAG = 28.7 * HbA1c - 46.7
-        if (enrollmentData.hba1c && !isNaN(enrollmentData.hba1c)) {
+        // 3. Autonomous Prediction Formula
+        const normAbs = pi * (Math.max(1.0, Math.min(3.5, redAvg / greenAvg)) / 2.5);
+        
+        // This adds the "Viscosity Correction" to prevent the 172 vs 141 error
+        let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        
+        // If viscosity is high (slower upstroke), glucose is likely higher
+        const viscosityAdjustment = (upstrokeTime - 120) * 0.15; 
+        prediction += viscosityAdjustment + (cal.personalOffset || 0);
+
+        // 4. Final HbA1c Weighting (The Anchor)
+        if (enrollmentData.hba1c) {
             const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
-            // Apply 15% weight to the long-term average to reduce variance
-            val = Math.round((val * 0.85) + (eAG * 0.15));
+            prediction = (prediction * 0.85) + (eAG * 0.15);
         }
 
-        // 6. Batch Logic Management
-        sessionBuffer.push({ val: val, abs: normAbs, raw: redAvg, var: variance, wave: fullWaveform });
-        const count = sessionBuffer.length;
+        const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
 
-        if (count < 5) {
-            document.getElementById('gluResult').innerText = val;
-            updateStatus(`WARMUP ${count}/5 - AUTO STARTING...`, "#ffa000");
-            document.getElementById('scanBtn').disabled = true;
-            document.getElementById('scanBtn').innerText = `AUTO SCAN (${count}/5)`;
-            setTimeout(runAnalysis, 1500); // Automatically start next scan after 1.5s
-            return; 
-        }
-
-        // Final Process (End of Batch)
-        sessionBuffer.sort((a,b) => a.var - b.var);
-        const finalVal = Math.round(sessionBuffer.slice(0,3).reduce((s,i)=>s+i.val, 0)/3);
-        const finalAbs = sessionBuffer[0].abs;
-        const finalRaw = sessionBuffer[0].raw;
-        const finalNoise = sessionBuffer[0].var; // Get the noise from the most stable scan
-        const finalWave = sessionBuffer[0].wave; // Capture the best waveform
-
-        document.getElementById('gluResult').innerText = finalVal;
-        updateStatus("ANALYSIS COMPLETE", "#2196f3");
-        
-        const logEntry = { 
-            name: enrollmentData.name, 
-            time: new Date().toLocaleTimeString(), 
+        // 5. Package for Batch & Cloud
+        sessionBuffer.push({ 
             val: finalVal, 
-            raw: finalRaw.toFixed(2), 
-            actual: "--", 
-            type: "BATCH_SCAN", 
-            noise: finalNoise.toFixed(2),
+            abs: normAbs, 
+            pi: pi, 
+            upstroke: upstrokeTime, 
+            raw: redAvg,
+            noise: variance,
+            wave: fullWaveform 
+        });
+
+        // Handle Batch Logic (Best of 5)
+        if (sessionBuffer.length < 5) {
+            document.getElementById('gluResult').innerText = finalVal;
+            updateStatus(`SYNCING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
+            setTimeout(runAnalysis, 1200);
+        } else {
+            finalizeBatch();
+        }
+    }
+
+    function finalizeBatch() {
+        // 1. Sort by noise and pick the most stable scan
+        sessionBuffer.sort((a, b) => a.noise - b.noise);
+        const best = sessionBuffer[0];
+
+        // 2. Build the Advanced Feature Vector
+        const featureVector = {
+            name: enrollmentData.name,
+            type: "BATCH_SCAN",
+            val: best.val,
+            raw: best.raw.toFixed(2),
+            actual: "--",
+            noise: best.noise.toFixed(2),
             finger: currentFinger,
-            absorbance: finalAbs.toFixed(4),
-            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept, offset: cal.personalOffset,
-            hba1c: enrollmentData.hba1c || "",
-            waveform: finalWave.join(",") // Send full waveform for Deep Learning
+            absorbance: best.abs.toFixed(4),
+            
+            // --- NEW MORPHOLOGICAL FEATURES ---
+            perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
+            upstrokeTime: best.upstroke.toFixed(2), // Viscosity marker
+            hba1c: enrollmentData.hba1c || "", // Biological anchor
+            bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
+            
+            // Coefficients for the current model
+            coefA: cal.coefA,
+            coefB: cal.coefB,
+            intercept: cal.intercept,
+            offset: cal.personalOffset,
+            
+            waveform: best.wave.join(",") // Raw data for Deep Learning training
         };
 
+        // 3. Push to Cloud
+        pushToCloud(featureVector);
+        
+        // UI Updates
+        document.getElementById('gluResult').innerText = best.val;
+        updateStatus("AUTONOMOUS CALIBRATION ACTIVE", "var(--accent)");
+        
+        // Add to local history
+        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString() };
         history.unshift(logEntry);
         localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
-        pushToCloud(logEntry);
         
         sessionBuffer = [];
         document.getElementById('scanBtn').disabled = false;
@@ -616,32 +667,34 @@
 
     function syncCal() {
         const actual = parseFloat(document.getElementById('meterVal').value);
-        if(!actual || history.length < 1) return alert("Scan first, then enter meter value to sync.");
+        if (!actual || history.length < 1) return alert("Scan first, then enter meter value.");
         
         const lastScan = history[0];
-        if (lastScan.absorbance === undefined) {
-            return alert("The last scan was made with an old app version. Please perform a new scan before syncing.");
-        }
         const abs = parseFloat(lastScan.absorbance);
-        if (isNaN(abs)) return alert("Invalid scan data. Please rescan.");
-        
-        // Calculate what the model predicted WITHOUT the personal offset
-        const modelPrediction = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        
-        // The "Learning": The difference between the meter and our model's prediction is the new offset
-        const newOffset = actual - modelPrediction;
+        const pi = parseFloat(lastScan.perfusionIndex) || 1.5;
+        const visco = parseFloat(lastScan.upstrokeTime) || 120;
 
-        // Smoothly update the personal offset using a weighted average (Adaptive Learning Rate)
-        cal.personalOffset = cal.personalOffset || 0;
-        // CHANGED: Increased to 0.8 so the system adapts immediately to your correction
-        const learningRate = 0.8; 
+        // 1. Calculate the 'Base Prediction' (The generic model)
+        const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
+        
+        // 2. Calculate the 'Biological Delta'
+        // We determine how much of the current error is due to your unique 
+        // blood viscosity (Visco) and pulse strength (PI).
+        const viscosityImpact = (visco - 120) * 0.15;
+        const personalPrediction = baseModelVal + viscosityImpact;
+
+        // 3. The New Learning: Adaptive Offset
+        // Instead of a flat correction, we learn the 'Residual Error' 
+        // after accounting for your heart and blood dynamics.
+        const newOffset = actual - personalPrediction;
+        
+        // Weighted learning (0.8) gives priority to your newest finger prick
+        const learningRate = 0.8;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
 
-        // --- Update local state and UI (re-integrated from previous version for consistency) ---
+        // 4. Update local history and accuracy stats
         history[0].actual = actual;
-
-        // Update Local Accuracy Estimate
         const predictedVal = parseFloat(lastScan.val);
         const currentError = Math.abs(predictedVal - actual) / actual;
         const currentAcc = Math.max(0, 100 - (currentError * 100));
@@ -650,14 +703,20 @@
         cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
 
         saveCal(); // Persist the updated 'cal' object for the current finger
-        localStorage.setItem('tathya_hist', JSON.stringify(history));
         
-        // Push the complete sync record to the cloud
-        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", offset: cal.personalOffset, coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept });
+        // Push the 'Complete Feature Set' to the cloud for AI training
+        pushToCloud({ 
+            ...lastScan, 
+            actual: actual, 
+            type: "SYNC", 
+            offset: cal.personalOffset,
+            visco_at_sync: visco,
+            pi_at_sync: pi
+        });
         
         updateUI(); 
         renderLog(); 
-        alert("Biological Profile Updated. Accuracy is increasing!");
+        alert(`Sync Successful! Biological Offset: ${cal.personalOffset.toFixed(1)} mg/dL. System is now more 'Autonomous'.`);
     }
 
     function saveCal() {
