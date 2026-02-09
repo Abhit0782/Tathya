@@ -628,44 +628,33 @@
     }
 
     function calculateUpstroke(smoothedData) {
-        if (smoothedData.length < 20) return 120; //
+        let lastTrough = -1;
+        let lastPeak = -1;
 
-        let troughIndex = -1;
-        let peakIndex = -1;
-
-        // 1. Find the Global Trough in the last 2 pulse cycles (approx 2 seconds)
-        // We look for the absolute minimum to avoid "jitter" troughs
-        let lookback = Math.min(smoothedData.length, 100); 
-        let minVal = Infinity;
-        for (let i = smoothedData.length - lookback; i < smoothedData.length; i++) {
-            if (smoothedData[i] < minVal) {
-                minVal = smoothedData[i];
-                troughIndex = i;
+        // Search backwards for the most recent pulse cycle
+        for (let i = smoothedData.length - 2; i > 1; i--) {
+            if (smoothedData[i] < smoothedData[i - 1] && smoothedData[i] < smoothedData[i + 1]) {
+                lastTrough = i;
+                break;
             }
         }
 
-        // 2. Find the Peak immediately FOLLOWING that trough
-        if (troughIndex > 0 && troughIndex < smoothedData.length - 5) {
-            let maxVal = -Infinity;
-            for (let j = troughIndex; j < smoothedData.length; j++) {
-                if (smoothedData[j] > maxVal) {
-                    maxVal = smoothedData[j];
-                    peakIndex = j;
+        if (lastTrough > 0) {
+            // Find the peak immediately following that trough
+            for (let j = lastTrough; j < smoothedData.length - 1; j++) {
+                if (smoothedData[j] > smoothedData[j - 1] && smoothedData[j] > smoothedData[j + 1]) {
+                    lastPeak = j;
+                    break;
                 }
             }
         }
 
-        // 3. Validation: The upstroke must be biologically plausible
-        if (peakIndex > troughIndex && troughIndex !== -1) {
-            let timeMs = (peakIndex - troughIndex) * frameInterval;
-            
-            // Biological Guard: Upstroke is usually 100ms - 300ms
-            if (timeMs > 20 && timeMs < 450) {
-                return Math.round(timeMs);
-            }
+        if (lastPeak > lastTrough && lastTrough !== -1) {
+            // Convert frame count to milliseconds using the calibrated interval
+            return (lastPeak - lastTrough) * frameInterval;
         }
         
-        return 120; // Default fallback to prevent "ERR" in logs
+        return 120; // Fallback to human average
     }
 
     function finishAnalysis(variance) {
