@@ -157,7 +157,7 @@
         bInt: 220, 
         syncCount: 0, 
         finalAccuracyPercent: 0,
-        coefA: 12.5, coefB: 45.0, intercept: 65.0,
+        coefA: -2.0, coefB: 45.0, intercept: 65.0, // FIX: Consistent negative curvature
         personalOffset: 0,
         sensitivityScale: 1.0
     };
@@ -490,7 +490,8 @@
             let avgRed = r / (pix.length/4);
             let avgGreen = g / (pix.length/4);
 
-            let intensity = (avgRed / (avgGreen || 1)) * 50;
+            // FIX: Add bias (+10) to denominator to dampen wild swings when Green is low
+            let intensity = (avgRed / (Math.max(avgGreen, 1) + 10)) * 50;
 
             // AUTO-RECOVERY: If absorbance is too high (saturated), reset the lens
             if (intensity > 60 && stream) {
@@ -828,7 +829,7 @@
         // after accounting for your heart and blood dynamics.
         const newOffset = actual - personalPrediction;
         
-        // Weighted learning (0.8) gives priority to your newest finger prick
+        // Weighted learning (0.3) gives priority to your newest finger prick
         const learningRate = 0.3;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
