@@ -145,8 +145,10 @@
     const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
     const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
     
-    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
+    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [], rawRedBuffer = [];
     let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
+    let actualFPS = 25; // Default fallback
+    let frameInterval = 40; // Default ms
     let sessionBuffer = []; // Stores scans for "Best of 5" logic
     let fullWaveform = []; // Store high-res waveform for AI training
     let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
@@ -394,11 +396,35 @@
         } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
     }
 
+    async function calibrateFPS() {
+        updateStatus("CALIBRATING HARDWARE...", "#2196f3");
+        let frameCount = 0;
+        let start = performance.now();
+        
+        return new Promise(resolve => {
+            const check = setInterval(() => {
+                ctx.drawImage(v, 0, 0, 50, 50);
+                frameCount++;
+                if (performance.now() - start >= 1000) {
+                    clearInterval(check);
+                    actualFPS = frameCount;
+                    frameInterval = 1000 / actualFPS;
+                    console.log(`Hardware Performance: ${actualFPS} FPS`);
+                    resolve();
+                }
+            }, 10); // Check at max speed to catch every frame
+        });
+    }
+
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
         if (sessionBuffer.length === 0) await refreshBrain(); 
         
         document.getElementById('scanBtn').disabled = true;
+        
+        // New: Calibrate FPS first to ensure time-based markers are accurate
+        await calibrateFPS(); 
+
         updateStatus("SENSITIVITY BOOST ACTIVE...", "#2196f3");
 
         if (stream) {
@@ -419,12 +445,11 @@
                     await new Promise(r => setTimeout(r, 1200));
 
                     // Phase 2: Lock settings with MAX EV to prevent "Too Dark" errors
-                    const maxEV = caps.exposureCompensation ? caps.exposureCompensation.max : 0;
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'manual' },
-                            { whiteBalanceMode: 'manual' },
-                            { exposureCompensation: maxEV }, 
+                            { exposureCompensation: -1.0 },
+                            { colorTemperature: 5500 },
                             { torch: true }
                         ]
                     });
@@ -432,7 +457,7 @@
             } catch(e) { console.warn("Hardware boost bypassed."); }
         }
 
-        buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
+        buffer = []; pulseArr = []; greenBuffer = []; rawRedBuffer = []; fullWaveform = []; let lastInt = 0;
         let start = Date.now();
         const duration = 10000;
 
@@ -462,11 +487,24 @@
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
             
             ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
+            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0;
+            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += pix[i+2]; }
             
-            let intensity = r / (pix.length/4);
-            let greenInt = g / (pix.length/4);
+            let avgRed = r / (pix.length/4);
+            let avgGreen = g / (pix.length/4);
+            let avgBlue = b / (pix.length/4);
+
+            let normalizedRed = avgRed / Math.max(avgGreen, avgBlue, 1);
+            let intensity = normalizedRed * 50;
+            let greenInt = avgGreen;
+
+            // Motion Detection
+            if (lastInt > 0 && Math.abs(intensity - lastInt) > 15) {
+                updateStatus("MOTION DETECTED", "#f44336");
+                lastInt = intensity;
+                return;
+            }
+            lastInt = intensity;
 
             // RELAXED THRESHOLDS: 
             // We now accept intensity as low as 3 (was 8) to account for thick skin/low light
@@ -479,6 +517,7 @@
                 if(elapsed > 1000) { 
                     buffer.push(intensity); 
                     greenBuffer.push(greenInt); 
+                    rawRedBuffer.push(avgRed); // Store Raw Red for PGR calculation
                     fullWaveform.push(intensity.toFixed(2)); 
                 }
             }
@@ -488,7 +527,7 @@
             drawWave(); 
             updateBPM();
             
-        }, 40); // Increased sampling rate from 100ms to 40ms
+        }, frameInterval); 
     }
 
     function updateBPM() {
@@ -551,101 +590,136 @@
         return smoothed;
     }
 
-    function finishAnalysis(variance) {
-        const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
-        
-        // 1. Calculate Perfusion Index (Signal Strength)
-        const acComponent = Math.sqrt(variance);
-        let pi = (acComponent / redAvg) * 100;
-        document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
-        
-        // SAFETY: If intensity is still low (e.g. 20-50), artificially boost PI to prevent "500" spike
-        // This compensates for the low signal-to-noise ratio in dark conditions
-        if (redAvg < 60) {
-             // FIX: Dampen PI when signal is dark to prevent false high readings
-             // If intensity is 30, we reduce PI by 50% (30/60) to account for noise
-             pi = pi * (redAvg / 60);
+    // --- NEW: FFT & SIGNAL PROCESSING ---
+    function fft(re, im) {
+        const n = re.length;
+        if (n <= 1) return;
+        const half = n / 2;
+        let reEven = new Float64Array(half), imEven = new Float64Array(half);
+        let reOdd = new Float64Array(half), imOdd = new Float64Array(half);
+        for (let i = 0; i < half; i++) {
+            reEven[i] = re[2 * i]; imEven[i] = im[2 * i];
+            reOdd[i] = re[2 * i + 1]; imOdd[i] = im[2 * i + 1];
         }
-        
-        // 2. Calculate Upstroke Time (Viscosity Marker)
-        // We analyze the 'fullWaveform' to find the time from trough to peak.
-        // NEW PROTECTED UPSTROKE LOGIC
-        let upstrokeTime = 120; // Default fallback
-        
-        // FIX: Smooth the waveform to detect peaks even in low light (Raw 12.52)
-        const numericWave = fullWaveform.map(Number);
-        const smoothedWave = applyGaussianFilter(numericWave);
+        fft(reEven, imEven);
+        fft(reOdd, imOdd);
+        for (let k = 0; k < half; k++) {
+            let th = -2 * Math.PI * k / n;
+            let wRe = Math.cos(th), wIm = Math.sin(th);
+            let tr = wRe * reOdd[k] - wIm * imOdd[k];
+            let ti = wRe * imOdd[k] + wIm * reOdd[k];
+            re[k] = reEven[k] + tr; im[k] = imEven[k] + ti;
+            re[k + half] = reEven[k] - tr; im[k + half] = imEven[k] - ti;
+        }
+    }
 
-        if (smoothedWave.length > 20) {
-            let lastTrough = -1, lastPeak = -1;
-            // Find last valid trough/peak pair in the signal
-            for (let i = smoothedWave.length - 5; i > 1; i--) {
-                if (smoothedWave[i] < smoothedWave[i-1] && smoothedWave[i] < smoothedWave[i+1]) {
-                    lastTrough = i; break;
-                }
-            }
-            if (lastTrough > 0) {
-                for (let j = lastTrough; j < smoothedWave.length - 1; j++) {
-                    if (smoothedWave[j] > smoothedWave[j-1] && smoothedWave[j] > smoothedWave[j+1]) {
-                        lastPeak = j;
-                        break;
-                    }
-                }
-            }
-            // Only update if we found a valid positive time gap
-            if (lastPeak > lastTrough && lastTrough !== -1) {
-                upstrokeTime = Math.min(240, Math.max(60, (lastPeak - lastTrough) * 40)); 
+    function calculateUpstroke(smoothedData) {
+        let lastTrough = -1;
+        let lastPeak = -1;
+
+        // Search backwards for the most recent pulse cycle
+        for (let i = smoothedData.length - 2; i > 1; i--) {
+            if (smoothedData[i] < smoothedData[i - 1] && smoothedData[i] < smoothedData[i + 1]) {
+                lastTrough = i;
+                break;
             }
         }
+
+        if (lastTrough > 0) {
+            // Find the peak immediately following that trough
+            for (let j = lastTrough; j < smoothedData.length - 1; j++) {
+                if (smoothedData[j] > smoothedData[j - 1] && smoothedData[j] > smoothedData[j + 1]) {
+                    lastPeak = j;
+                    break;
+                }
+            }
+        }
+
+        if (lastPeak > lastTrough && lastTrough !== -1) {
+            // Convert frame count to milliseconds using the calibrated interval
+            return (lastPeak - lastTrough) * frameInterval;
+        }
+        
+        return 120; // Fallback to human average
+    }
+
+    function finishAnalysis(variance) {
+        // 1. Calculate Ratio-of-Ratios (RoR)
+        // This removes DC interference from skin/pressure
+        const dcRed = rawRedBuffer.reduce((a, b) => a + b, 0) / rawRedBuffer.length;
+        const dcGreen = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+        
+        // AC is the variation; we use Standard Deviation for robustness
+        const acRed = Math.sqrt(rawRedBuffer.reduce((a, b) => a + (b - dcRed) ** 2, 0) / rawRedBuffer.length);
+        const acGreen = Math.sqrt(greenBuffer.reduce((a, b) => a + (b - dcGreen) ** 2, 0) / greenBuffer.length);
+        
+        // The "RoR" is the key to cross-device and cross-skin-tone accuracy
+        const ror = (acRed / dcRed) / (acGreen / dcGreen || 1);
+
+        // Calculate PI for UI display
+        const pi = (acRed / dcRed) * 100;
+        document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
+
+        // 2. Perform FFT for Signal-to-Noise Ratio (SNR)
+        // We check if the heartbeat frequency is strong enough to trust
+        const fftIn = buffer.slice(-128).map(v => v); // Use power-of-2 samples
+        const im = new Float64Array(fftIn.length).fill(0);
+        fft(fftIn, im); 
+        
+        // Find the power of the pulse (0.7Hz to 3Hz)
+        let maxPower = 0;
+        for (let i = 2; i < 15; i++) { // Approx range for 42-200 BPM
+            let power = Math.sqrt(fftIn[i]**2 + im[i]**2);
+            if (power > maxPower) maxPower = power;
+        }
+
+        // 3. Quality Gate: Reject if signal is "mushy"
+        if (maxPower < 5 || ror > 2.5) { 
+            updateStatus("POOR SIGNAL QUALITY - RETRY", "#f44336");
+            document.getElementById('scanBtn').disabled = false;
+            return;
+        }
+
+        // 4. Advanced Morphological Analysis
+        // Calculate Upstroke (Viscosity) using smoothed data
+        const smoothed = applyGaussianFilter(fullWaveform.map(Number));
+        let upstrokeTime = calculateUpstroke(smoothed); 
         document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
 
-        // 3. Autonomous Prediction Formula
-        // FIX: If intensity is low (<60), clamp the PGR multiplier to avoid exploding the result
-        let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
-        if (redAvg < 60 || greenAvg < 10) pgr = 1.0; // Force neutral multiplier in low light
+        // 5. Multi-Feature Prediction Formula
+        // Combine RoR (Chemistry), Upstroke (Viscosity), and HbA1c (Baseline)
+        let prediction = (cal.coefA * Math.pow(ror, 2)) + (cal.coefB * ror) + cal.intercept;
         
-        const normAbs = pi * (pgr / 2.5);
-        
-        // This adds the "Viscosity Correction" to prevent the 172 vs 141 error
-        let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
-        
-        // If viscosity is high (slower upstroke), glucose is likely higher
-        const viscosityAdjustment = (upstrokeTime - 120) * 0.15; 
+        // Biological adjustments
+        const viscosityAdjustment = (upstrokeTime - 120) * 0.15;
         prediction += viscosityAdjustment + (cal.personalOffset || 0);
 
-        // 4. Final HbA1c Weighting (The Anchor)
+        // Anchor with HbA1c if available
         if (enrollmentData.hba1c) {
             const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
-            prediction = (prediction * 0.85) + (eAG * 0.15);
+            prediction = (prediction * 0.80) + (eAG * 0.20); 
         }
 
         const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
-
-        // 5. Package for Batch & Cloud
+        
+        // 6. Finalize the Batch
         sessionBuffer.push({ 
-            val: finalVal, 
-            abs: normAbs, 
-            pi: pi, 
-            upstroke: upstrokeTime, 
-            raw: redAvg,
-            noise: variance,
-            wave: fullWaveform 
+            val: finalVal, ror: ror, upstroke: upstrokeTime, 
+            snr: maxPower, raw: dcRed, noise: variance, wave: fullWaveform, pi: pi
         });
 
-        // Handle Batch Logic (Best of 5)
         if (sessionBuffer.length < 5) {
             document.getElementById('gluResult').innerText = finalVal;
-            updateStatus(`SYNCING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
-            setTimeout(runAnalysis, 1200);
+            updateStatus(`CALIBRATING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
+            setTimeout(runAnalysis, 800);
         } else {
             finalizeBatch();
         }
     }
 
     function finalizeBatch() {
-        // 1. Sort by noise and pick the most stable scan
-        sessionBuffer.sort((a, b) => a.noise - b.noise);
+        // 1. Sort by SNR (Signal Quality) descending - Higher is better
+        sessionBuffer.sort((a, b) => b.snr - a.snr);
         const best = sessionBuffer[0];
 
         // 2. Build the Advanced Feature Vector
@@ -657,7 +731,8 @@
             actual: "--",
             noise: best.noise.toFixed(2),
             finger: currentFinger,
-            absorbance: best.abs.toFixed(4),
+            absorbance: best.ror.toFixed(4), // Mapped RoR to Absorbance for backend
+            snr: best.snr.toFixed(2), // New Spectral Power metric
             
             // --- NEW MORPHOLOGICAL FEATURES ---
             perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
@@ -716,7 +791,7 @@
         const newOffset = actual - personalPrediction;
         
         // Weighted learning (0.8) gives priority to your newest finger prick
-        const learningRate = 0.8;
+        const learningRate = 0.3;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
 
