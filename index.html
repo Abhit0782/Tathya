@@ -473,8 +473,8 @@
                 }
                 
                 const varR = getVariance(buffer);
-                // Increased noise tolerance to 1200 to allow for slight finger tremors
-                if(varR > 1200) { 
+                // FIX: Increased tolerance to 3500 because *50 scaling creates naturally high variance
+                if(varR > 3500) { 
                     updateStatus("STABILIZE FINGER", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                 } else {
@@ -494,7 +494,9 @@
             let avgGreen = g / (pix.length/4);
             let avgBlue = b / (pix.length/4);
 
-            let normalizedRed = avgRed / Math.max(avgGreen, avgBlue, 1);
+            // FIX: Clamp denominator to 3 to prevent "Infinity" spikes in dark conditions
+            // This stops the signal from jumping wildly when Green channel is < 3
+            let normalizedRed = avgRed / Math.max(avgGreen, avgBlue, 3);
             let intensity = normalizedRed * 50;
             let greenInt = avgGreen;
 
@@ -904,4 +906,3 @@
 </script>
 </body>
 </html>
-
