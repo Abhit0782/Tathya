@@ -674,6 +674,13 @@
         const pi = (acRed / dcRed) * 100;
         document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
 
+        // FIX: Add Low-Light Signal Quality Gate. Rejects scans that are too dark.
+        if (dcRed < 20) {
+            updateStatus(`SIGNAL TOO DARK (${dcRed.toFixed(1)})`, "#f44336");
+            document.getElementById('scanBtn').disabled = false;
+            return;
+        }
+
         // 2. Perform FFT for Signal-to-Noise Ratio (SNR)
         // We check if the heartbeat frequency is strong enough to trust
         const fftIn = buffer.slice(-128).map(v => v); // Use power-of-2 samples
