@@ -206,7 +206,6 @@
             }
             
             updateUI(); drawTrend(); renderLog();
-            updateCalibrationHealth();
         } catch(e) { alert("Camera Permission Required"); }
     }
 
@@ -875,7 +874,6 @@
         
         updateUI(); 
         renderLog(); 
-        updateCalibrationHealth();
         alert(`Sync Successful! Result: ${zone}`);
     }
 
@@ -925,29 +923,6 @@
     document.getElementById('statusMsg').innerText = statusText;
     document.getElementById('statusMsg').style.color = statusColor;
 }
-
-    function updateCalibrationHealth() {
-        const syncedScans = history.filter(h => h.zone);
-        if (syncedScans.length === 0) return;
-
-        // Count how many scans are in Zone A
-        const zoneAScans = syncedScans.filter(h => h.zone.includes("Zone A")).length;
-        const healthPercent = (zoneAScans / syncedScans.length) * 100;
-
-        // Update the UI
-        const healthEl = document.getElementById('calText');
-        healthEl.innerText = `ZONE A ACCURACY: ${healthPercent.toFixed(0)}%`;
-        
-        // Color code the bar based on the 90% goal
-        const syncBar = document.getElementById('calBar');
-        if (healthPercent >= 90) {
-            syncBar.style.backgroundColor = "var(--accent)"; // Green for 90%+
-        } else if (healthPercent >= 75) {
-            syncBar.style.backgroundColor = "var(--blue)"; // Blue for good progress
-        } else {
-            syncBar.style.backgroundColor = "#ffa000"; // Orange for learning phase
-        }
-    }
 
     function hardReset() {
         if(confirm("This will wipe all data and reset the app. Continue?")) {
