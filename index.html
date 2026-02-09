@@ -151,7 +151,9 @@
     let frameInterval = 40; // Default ms
     let sessionBuffer = []; // Stores scans for "Best of 5" logic
     let fullWaveform = []; // Store high-res waveform for AI training
-    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
+    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";
+    let lastBrainSync = 0; // Global variable
+    let isScanning = false; // Prevent overlapping scans
     
     const defaultCal = { 
         bInt: 220, 
@@ -206,7 +208,6 @@
             }
             
             updateUI(); drawTrend(); renderLog();
-            updateCalibrationHealth();
         } catch(e) { alert("Camera Permission Required"); }
     }
 
@@ -285,10 +286,14 @@
         const timer = setInterval(() => {
             let elapsed = Date.now() - start;
             document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
-            ctx.drawImage(ve, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
-            stepBuffer.push(r / (pix.length/4));
+            if (ve.readyState >= 2) {
+                try {
+                    ctx.drawImage(ve, 0, 0, 50, 50);
+                    let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
+                    for(let i=0; i<pix.length; i+=4) r += pix[i];
+                    stepBuffer.push(r / (pix.length/4));
+                } catch(e) {}
+            }
             if(elapsed >= 5000) {
                 clearInterval(timer);
                 enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: (stepBuffer.reduce((a,b)=>a+b,0)/stepBuffer.length) });
@@ -404,11 +409,15 @@
         
         return new Promise(resolve => {
             const check = setInterval(() => {
-                ctx.drawImage(v, 0, 0, 50, 50);
-                frameCount++;
+                if (v.readyState >= 2) {
+                    try {
+                        ctx.drawImage(v, 0, 0, 50, 50);
+                        frameCount++;
+                    } catch(e) {}
+                }
                 if (performance.now() - start >= 1000) {
                     clearInterval(check);
-                    actualFPS = frameCount;
+                    actualFPS = frameCount > 0 ? frameCount : 25; // Fallback to avoid Infinity
                     frameInterval = 1000 / actualFPS;
                     console.log(`Hardware Performance: ${actualFPS} FPS`);
                     resolve();
@@ -419,12 +428,18 @@
 
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        if (sessionBuffer.length === 0) await refreshBrain(); 
         
+        // Only sync from cloud if it's been more than 5 minutes since the last sync
+        if (Date.now() - lastBrainSync > 300000) {
+            await refreshBrain();
+            lastBrainSync = Date.now();
+        }
+
         document.getElementById('scanBtn').disabled = true;
         
         // New: Calibrate FPS first to ensure time-based markers are accurate
         await calibrateFPS(); 
+        const targetFrames = Math.ceil(actualFPS * 10); // Target 10 seconds of data
 
         updateStatus("SENSITIVITY BOOST ACTIVE...", "#2196f3");
 
@@ -460,12 +475,24 @@
 
         buffer = []; pulseArr = []; greenBuffer = []; rawRedBuffer = []; fullWaveform = []; let lastInt = 0;
         let start = Date.now();
+        let totalProcessedFrames = 0; 
 
         const timer = setInterval(async () => {
+            totalProcessedFrames++;
+            // If we've processed 1000 frames without getting enough clean ones, stop.
+            if (totalProcessedFrames > 1000) {
+                clearInterval(timer);
+                updateStatus("TOO MUCH NOISE - RESTART", "#f44336");
+                document.getElementById('scanBtn').disabled = false;
+                return;
+            }
+
             const elapsed = Date.now() - start;
             
             // Completion: 200 frames ~ 8 seconds of CLEAN data
             if (buffer.length >= 200) {
+            // Completion: targetFrames (Time-based instead of fixed count)
+            if (buffer.length >= targetFrames) {
                 clearInterval(timer);
                 finishAnalysis(getDynamicVariance(buffer));
                 return;
@@ -481,15 +508,21 @@
 
             // UI Progress
             let progress = buffer.length / 200;
+            let progress = buffer.length / targetFrames;
             clock.style.strokeDashoffset = 816 - (progress * 816);
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((200 - buffer.length) * frameInterval / 1000)).toString().padStart(2,'0')}`;
+            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((targetFrames - buffer.length) * frameInterval / 1000)).toString().padStart(2,'0')}`;
             
-            ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
-            
-            let avgRed = r / (pix.length/4);
-            let avgGreen = g / (pix.length/4);
+            let avgRed = 0, avgGreen = 0;
+            if (v.readyState >= 2) {
+                try {
+                    ctx.drawImage(v, 0, 0, 50, 50);
+                    let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
+                    for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
+                    avgRed = r / (pix.length/4);
+                    avgGreen = g / (pix.length/4);
+                } catch(e) {}
+            }
 
             // FIX: Add bias (+10) to denominator to dampen wild swings when Green is low
             let intensity = (avgRed / (Math.max(avgGreen, 1) + 10)) * 50;
@@ -503,8 +536,10 @@
                  } catch(e) {}
             }
 
+            const maxPulseHistory = Math.ceil(actualFPS * 5); // 5 seconds window
             pulseArr.push(intensity); 
             if(pulseArr.length > 125) pulseArr.shift();
+            if(pulseArr.length > maxPulseHistory) pulseArr.shift();
             
             // ADAPTIVE THRESHOLD: Don't fail, just wait for better data
             let currentNoise = getDynamicVariance(pulseArr);
@@ -529,6 +564,7 @@
 
     function updateBPM() {
         if(pulseArr.length < 40) return;
+        if(pulseArr.length < (actualFPS * 2)) return;
         
         // Bandpass Filter (0.5Hz - 4.0Hz) for clean AC component
         // 1. High Pass (DC Removal)
@@ -552,6 +588,11 @@
         // 50 frames @ 100ms = 5 seconds. BPM = peaks * (60/5) = peaks * 12
         let bpm = peaks * 12;
         if(bpm > 50 && bpm < 180) document.getElementById('bpmVal').innerText = bpm + " ♥";
+        
+        // Dynamic BPM calculation based on actual frame interval
+        const durationSec = (pulseArr.length * frameInterval) / 1000;
+        let bpm = Math.round((peaks / durationSec) * 60);
+        if(bpm > 45 && bpm < 180) document.getElementById('bpmVal').innerText = bpm + " ♥";
     }
 
     function drawWave() {
@@ -560,6 +601,7 @@
         const max = Math.max(...pulseArr) || 100, min = Math.min(...pulseArr) || 0, range = max - min || 1;
         pulseArr.forEach((p, i) => {
             const x = (i / 125) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
+            const x = (i / (pulseArr.length - 1)) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
             if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
         });
         pCtx.stroke();
@@ -670,6 +712,8 @@
     }
 
     function finishAnalysis(variance) {
+        if (sessionBuffer.length === 0 && buffer.length === 0) return; // Guard against empty calls
+
         // 1. Calculate Ratio-of-Ratios (RoR)
         // This removes DC interference from skin/pressure
         const dcRed = rawRedBuffer.reduce((a, b) => a + b, 0) / rawRedBuffer.length;
@@ -733,6 +777,12 @@
             prediction = (prediction * 0.80) + (eAG * 0.20); 
         }
 
+        // ADD THIS GUARD: Ensure prediction is a real number
+        if (isNaN(prediction) || !isFinite(prediction)) {
+            prediction = 100; // Safe fallback
+            console.error("Math error detected, using fallback.");
+        }
+
         const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
         
         // 6. Finalize the Batch
@@ -744,7 +794,9 @@
         if (sessionBuffer.length < 5) {
             document.getElementById('gluResult').innerText = finalVal;
             updateStatus(`CALIBRATING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
-            setTimeout(runAnalysis, 800);
+            
+            // Small delay to let the UI breathe before next batch scan
+            setTimeout(() => { isScanning = false; runAnalysis(); }, 1000);
         } else {
             finalizeBatch();
         }
@@ -875,7 +927,6 @@
         
         updateUI(); 
         renderLog(); 
-        updateCalibrationHealth();
         alert(`Sync Successful! Result: ${zone}`);
     }
 
@@ -885,9 +936,25 @@
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
     }
 
-    function pushToCloud(data) {
+    async function pushToCloud(data) {
         const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline, hba1c: enrollmentData?.hba1c };
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
+        
+        // Prevent pushing NaN or Infinity to the DB
+        const cleanData = JSON.parse(JSON.stringify(fullData, (key, value) =>
+            typeof value === 'number' && !isFinite(value) ? 0 : value
+        ));
+
+        try {
+            await fetch(GOOGLE_SCRIPT_URL, {
+                method: 'POST',
+                mode: 'no-cors', // Keeps it fast by not waiting for a full response
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(cleanData)
+            });
+            console.log("Data packet synced to cloud.");
+        } catch (e) {
+            console.warn("Sync failed, check internet connection.");
+        }
     }
 
     function updateUI() {
@@ -925,29 +992,6 @@
     document.getElementById('statusMsg').innerText = statusText;
     document.getElementById('statusMsg').style.color = statusColor;
 }
-
-    function updateCalibrationHealth() {
-        const syncedScans = history.filter(h => h.zone);
-        if (syncedScans.length === 0) return;
-
-        // Count how many scans are in Zone A
-        const zoneAScans = syncedScans.filter(h => h.zone.includes("Zone A")).length;
-        const healthPercent = (zoneAScans / syncedScans.length) * 100;
-
-        // Update the UI
-        const healthEl = document.getElementById('calText');
-        healthEl.innerText = `ZONE A ACCURACY: ${healthPercent.toFixed(0)}%`;
-        
-        // Color code the bar based on the 90% goal
-        const syncBar = document.getElementById('calBar');
-        if (healthPercent >= 90) {
-            syncBar.style.backgroundColor = "var(--accent)"; // Green for 90%+
-        } else if (healthPercent >= 75) {
-            syncBar.style.backgroundColor = "var(--blue)"; // Blue for good progress
-        } else {
-            syncBar.style.backgroundColor = "#ffa000"; // Orange for learning phase
-        }
-    }
 
     function hardReset() {
         if(confirm("This will wipe all data and reset the app. Continue?")) {
