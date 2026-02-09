@@ -206,6 +206,7 @@
             }
             
             updateUI(); drawTrend(); renderLog();
+            updateCalibrationHealth();
         } catch(e) { alert("Camera Permission Required"); }
     }
 
@@ -628,33 +629,44 @@
     }
 
     function calculateUpstroke(smoothedData) {
-        let lastTrough = -1;
-        let lastPeak = -1;
+        if (smoothedData.length < 20) return 120; //
 
-        // Search backwards for the most recent pulse cycle
-        for (let i = smoothedData.length - 2; i > 1; i--) {
-            if (smoothedData[i] < smoothedData[i - 1] && smoothedData[i] < smoothedData[i + 1]) {
-                lastTrough = i;
-                break;
+        let troughIndex = -1;
+        let peakIndex = -1;
+
+        // 1. Find the Global Trough in the last 2 pulse cycles (approx 2 seconds)
+        // We look for the absolute minimum to avoid "jitter" troughs
+        let lookback = Math.min(smoothedData.length, 100); 
+        let minVal = Infinity;
+        for (let i = smoothedData.length - lookback; i < smoothedData.length; i++) {
+            if (smoothedData[i] < minVal) {
+                minVal = smoothedData[i];
+                troughIndex = i;
             }
         }
 
-        if (lastTrough > 0) {
-            // Find the peak immediately following that trough
-            for (let j = lastTrough; j < smoothedData.length - 1; j++) {
-                if (smoothedData[j] > smoothedData[j - 1] && smoothedData[j] > smoothedData[j + 1]) {
-                    lastPeak = j;
-                    break;
+        // 2. Find the Peak immediately FOLLOWING that trough
+        if (troughIndex > 0 && troughIndex < smoothedData.length - 5) {
+            let maxVal = -Infinity;
+            for (let j = troughIndex; j < smoothedData.length; j++) {
+                if (smoothedData[j] > maxVal) {
+                    maxVal = smoothedData[j];
+                    peakIndex = j;
                 }
             }
         }
 
-        if (lastPeak > lastTrough && lastTrough !== -1) {
-            // Convert frame count to milliseconds using the calibrated interval
-            return (lastPeak - lastTrough) * frameInterval;
+        // 3. Validation: The upstroke must be biologically plausible
+        if (peakIndex > troughIndex && troughIndex !== -1) {
+            let timeMs = (peakIndex - troughIndex) * frameInterval;
+            
+            // Biological Guard: Upstroke is usually 100ms - 300ms
+            if (timeMs > 20 && timeMs < 450) {
+                return Math.round(timeMs);
+            }
         }
         
-        return 120; // Fallback to human average
+        return 120; // Default fallback to prevent "ERR" in logs
     }
 
     function finishAnalysis(variance) {
@@ -863,6 +875,7 @@
         
         updateUI(); 
         renderLog(); 
+        updateCalibrationHealth();
         alert(`Sync Successful! Result: ${zone}`);
     }
 
@@ -912,6 +925,29 @@
     document.getElementById('statusMsg').innerText = statusText;
     document.getElementById('statusMsg').style.color = statusColor;
 }
+
+    function updateCalibrationHealth() {
+        const syncedScans = history.filter(h => h.zone);
+        if (syncedScans.length === 0) return;
+
+        // Count how many scans are in Zone A
+        const zoneAScans = syncedScans.filter(h => h.zone.includes("Zone A")).length;
+        const healthPercent = (zoneAScans / syncedScans.length) * 100;
+
+        // Update the UI
+        const healthEl = document.getElementById('calText');
+        healthEl.innerText = `ZONE A ACCURACY: ${healthPercent.toFixed(0)}%`;
+        
+        // Color code the bar based on the 90% goal
+        const syncBar = document.getElementById('calBar');
+        if (healthPercent >= 90) {
+            syncBar.style.backgroundColor = "var(--accent)"; // Green for 90%+
+        } else if (healthPercent >= 75) {
+            syncBar.style.backgroundColor = "var(--blue)"; // Blue for good progress
+        } else {
+            syncBar.style.backgroundColor = "#ffa000"; // Orange for learning phase
+        }
+    }
 
     function hardReset() {
         if(confirm("This will wipe all data and reset the app. Continue?")) {
