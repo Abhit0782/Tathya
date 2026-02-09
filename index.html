@@ -459,73 +459,66 @@
 
         buffer = []; pulseArr = []; greenBuffer = []; rawRedBuffer = []; fullWaveform = []; let lastInt = 0;
         let start = Date.now();
-        const duration = 10000;
 
-        const timer = setInterval(() => {
+        const timer = setInterval(async () => {
             const elapsed = Date.now() - start;
             
-            if (elapsed >= duration) {
+            // Completion: 200 frames ~ 8 seconds of CLEAN data
+            if (buffer.length >= 200) {
                 clearInterval(timer);
-                if(buffer.length < 80) { // Reduced required frames to 80 for faster lock
-                    updateStatus("SIGNAL LOST - RETRYING...", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                    return;
-                }
-                
-                const varR = getVariance(buffer);
-                // FIX: Increased tolerance to 3500 because *50 scaling creates naturally high variance
-                if(varR > 3500) { 
-                    updateStatus("STABILIZE FINGER", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                } else {
-                    finishAnalysis(varR);
-                }
+                finishAnalysis(getDynamicVariance(buffer));
+                return;
+            }
+            
+            // Safety Timeout (25s)
+            if (elapsed > 25000) {
+                clearInterval(timer);
+                updateStatus("TIMEOUT - TRY AGAIN", "#f44336");
+                document.getElementById('scanBtn').disabled = false;
                 return;
             }
 
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
-            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
+            // UI Progress
+            let progress = buffer.length / 200;
+            clock.style.strokeDashoffset = 816 - (progress * 816);
+            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((200 - buffer.length) * frameInterval / 1000)).toString().padStart(2,'0')}`;
             
             ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0;
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += pix[i+2]; }
+            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
+            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
             
             let avgRed = r / (pix.length/4);
             let avgGreen = g / (pix.length/4);
-            let avgBlue = b / (pix.length/4);
 
-            // FIX: Clamp denominator to 3 to prevent "Infinity" spikes in dark conditions
-            // This stops the signal from jumping wildly when Green channel is < 3
-            let normalizedRed = avgRed / Math.max(avgGreen, avgBlue, 3);
-            let intensity = normalizedRed * 50;
-            let greenInt = avgGreen;
+            let intensity = (avgRed / (avgGreen || 1)) * 50;
 
-            // Motion Detection
-            if (lastInt > 0 && Math.abs(intensity - lastInt) > 15) {
-                updateStatus("MOTION DETECTED", "#f44336");
-                lastInt = intensity;
-                return;
+            // AUTO-RECOVERY: If absorbance is too high (saturated), reset the lens
+            if (intensity > 60 && stream) {
+                 try {
+                    const track = stream.getVideoTracks()[0];
+                    await track.applyConstraints({ advanced: [{ exposureCompensation: -2.0 }] });
+                    updateStatus("ADJUSTING LIGHT...", "#ffa000");
+                 } catch(e) {}
             }
-            lastInt = intensity;
 
-            // RELAXED THRESHOLDS: 
-            // We now accept intensity as low as 3 (was 8) to account for thick skin/low light
-            if(intensity < 1) { 
-                updateStatus("COVER LENS COMPLETELY", "#f44336"); 
-            } else if(intensity < 3) { 
-                updateStatus("STILL TOO DARK - LIGHT TOUCH", "#ff9800");
+            pulseArr.push(intensity); 
+            if(pulseArr.length > 125) pulseArr.shift();
+            
+            // ADAPTIVE THRESHOLD: Don't fail, just wait for better data
+            let currentNoise = getDynamicVariance(pulseArr);
+            
+            if (currentNoise > 2000) {
+                updateStatus("STABILIZING...", "#ff9800"); 
             } else {
-                updateStatus(`SIGNAL ACQUIRED: ${intensity.toFixed(0)}`, "#00e676");
+                updateStatus("SIGNAL LOCKED", "#00e676");
                 if(elapsed > 1000) { 
                     buffer.push(intensity); 
-                    greenBuffer.push(greenInt); 
-                    rawRedBuffer.push(avgRed); // Store Raw Red for PGR calculation
+                    greenBuffer.push(avgGreen); 
+                    rawRedBuffer.push(avgRed); 
                     fullWaveform.push(intensity.toFixed(2)); 
                 }
             }
             
-            pulseArr.push(intensity); 
-            if(pulseArr.length > 125) pulseArr.shift();
             drawWave(); 
             updateBPM();
             
@@ -575,9 +568,27 @@
         el.innerText = msg; el.style.color = color;
     }
 
-    function getVariance(arr) {
-        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-        return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
+    // Replace your existing noise logic with this
+    function getDynamicVariance(arr) {
+        if (arr.length < 10) return 0;
+        
+        // Step 1: 3-Point Median Filter (Removes isolated bad pixels)
+        let medianFiltered = [];
+        for(let i = 1; i < arr.length - 1; i++) {
+            let window = [arr[i-1], arr[i], arr[i+1]].sort((a,b) => a-b);
+            medianFiltered.push(window[1]);
+        }
+
+        // Step 2: Exponential Moving Average (Smooths hand tremors)
+        let smoothed = [], alpha = 0.3;
+        smoothed[0] = medianFiltered[0];
+        for(let i = 1; i < medianFiltered.length; i++) {
+            smoothed[i] = alpha * medianFiltered[i] + (1 - alpha) * smoothed[i-1];
+        }
+
+        // Calculate variance on the 'Clean' signal
+        const mean = smoothed.reduce((a, b) => a + b, 0) / smoothed.length;
+        return smoothed.reduce((a, b) => a + (b - mean) ** 2, 0) / smoothed.length;
     }
 
     // Helper: Gaussian Smoothing Filter to remove sensor jitter
@@ -769,11 +780,36 @@
         renderLog(); drawTrend();
     }
 
+    function getClarkeZone(pred, actual) {
+        if (!actual || actual <= 0) return "N/A";
+
+        // Standard clinical boundaries for Clarke Error Grid
+        if (Math.abs(pred - actual) <= actual * 0.20 || (actual < 70 && Math.abs(pred - actual) <= 15)) {
+            return "Zone A (Accurate)";
+        } else if ((pred <= 70 && actual <= 70) || 
+                   (pred >= 180 && actual >= 180) || 
+                   (pred > actual && pred < (actual * 1.5)) || 
+                   (pred < actual && pred > (actual * 0.5))) {
+            return "Zone B (Safe)";
+        } else if ((actual < 70 && pred > 180) || (actual > 180 && pred < 70)) {
+            return "Zone E (Dangerous)";
+        } else {
+            return "Zone C/D (Corrective)";
+        }
+    }
+
     function syncCal() {
         const actual = parseFloat(document.getElementById('meterVal').value);
         if (!actual || history.length < 1) return alert("Scan first, then enter meter value.");
         
         const lastScan = history[0];
+        const zone = getClarkeZone(lastScan.val, actual); // Calculate CEG Score
+        
+        // Update local history object
+        history[0].actual = actual;
+        history[0].zone = zone;
+        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
+
         const abs = parseFloat(lastScan.absorbance);
         const pi = parseFloat(lastScan.perfusionIndex) || 1.5;
         const visco = parseFloat(lastScan.upstrokeTime) || 120;
@@ -798,7 +834,6 @@
         cal.syncCount = (cal.syncCount || 0) + 1;
 
         // 4. Update local history and accuracy stats
-        history[0].actual = actual;
         const predictedVal = parseFloat(lastScan.val);
         const currentError = Math.abs(predictedVal - actual) / actual;
         const currentAcc = Math.max(0, 100 - (currentError * 100));
@@ -820,7 +855,7 @@
         
         updateUI(); 
         renderLog(); 
-        alert(`Sync Successful! Biological Offset: ${cal.personalOffset.toFixed(1)} mg/dL. System is now more 'Autonomous'.`);
+        alert(`Sync Successful! Result: ${zone}`);
     }
 
     function saveCal() {
@@ -895,7 +930,35 @@
         tCtx.stroke();
     }
 
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
+    function renderLog() {
+        const logContainer = document.getElementById('historyLog');
+        logContainer.innerHTML = history.map(h => {
+            // Color coding for clinical zones
+            let zoneColor = "#555"; // Default (not synced)
+            if (h.zone) {
+                if (h.zone.includes("Zone A")) zoneColor = "#00e676"; // Accurate
+                else if (h.zone.includes("Zone B")) zoneColor = "#ffa000"; // Safe
+                else zoneColor = "#f44336"; // Danger zones
+            }
+
+            return `
+                <div class="log-item" style="border-left: 4px solid ${zoneColor}; padding-left: 10px;">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-size: 10px; color: #888;">${h.time}</span>
+                        <span style="font-weight: bold; font-size: 14px;">${h.val} mg/dL</span>
+                    </div>
+                    <div style="text-align: right; display: flex; flex-direction: column;">
+                        <span style="font-size: 10px; color: ${zoneColor}; font-weight: 800;">
+                            ${h.zone || "PENDING SYNC"}
+                        </span>
+                        <span style="font-size: 10px; color: #555;">
+                            Meter: ${h.actual || "--"}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
     
     // Register Service Worker for PWA
     if ('serviceWorker' in navigator) {
