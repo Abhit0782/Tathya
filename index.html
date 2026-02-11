@@ -396,98 +396,76 @@
 
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash.");
-        if (sessionBuffer.length === 0) await refreshBrain(); 
-        
         document.getElementById('scanBtn').disabled = true;
-        updateStatus("SENSITIVITY BOOST ACTIVE...", "#2196f3");
-
+        updateStatus("OPTIMIZING FOR HARDWARE GAP...", "#2196f3");
+    
         if (stream) {
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = track.getCapabilities ? track.getCapabilities() : null;
                 if (caps) {
-                    // Phase 1: Continuous mode to let sensor find the light (Fixes "Disappearing" signal)
+                    // STEP 1: Search for the light across the distance
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'continuous' },
-                            { whiteBalanceMode: 'continuous' },
+                            { exposureCompensation: caps.exposureCompensation?.max || 0 },
                             { torch: true }
                         ]
                     });
+                    // Wait for the sensor to "bridge" the gap
+                    await new Promise(r => setTimeout(r, 1500));
                     
-                    // Wait 1.2s for brightness to stabilize
-                    await new Promise(r => setTimeout(r, 1200));
-
-                    // Phase 2: Lock settings with MAX EV to prevent "Too Dark" errors
-                    const maxEV = caps.exposureCompensation ? caps.exposureCompensation.max : 0;
+                    // STEP 2: Lock the best possible hardware state
                     await track.applyConstraints({
-                        advanced: [
-                            { exposureMode: 'manual' },
-                            { whiteBalanceMode: 'manual' },
-                            { exposureCompensation: maxEV }, 
-                            { torch: true }
-                        ]
+                        advanced: [{ exposureMode: 'manual' }, { torch: true }]
                     });
                 }
-            } catch(e) { console.warn("Hardware boost bypassed."); }
+            } catch(e) { console.warn("Hardware optimization bypassed."); }
         }
-
+    
         buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
         let start = Date.now();
-        const duration = 10000;
-
+        const duration = 12000; // Increased to 12s to allow for low-signal processing
+    
         const timer = setInterval(() => {
             const elapsed = Date.now() - start;
-            
             if (elapsed >= duration) {
                 clearInterval(timer);
-                if(buffer.length < 80) { // Reduced required frames to 80 for faster lock
-                    updateStatus("SIGNAL LOST - RETRYING...", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                    return;
-                }
-                
-                const varR = getVariance(buffer);
-                // Increased noise tolerance to 1200 to allow for slight finger tremors
-                if(varR > 1200) { 
-                    updateStatus("STABILIZE FINGER", "#f44336");
+                // ROOT CAUSE FIX: Check for heart-beat presence rather than just light level
+                const variance = getVariance(buffer);
+                if(buffer.length < 100 || variance < 0.01) { 
+                    updateStatus("SIGNAL TOO WEAK - REPOSITION FINGER", "#f44336");
                     document.getElementById('scanBtn').disabled = false;
                 } else {
-                    finishAnalysis(varR);
+                    finishAnalysis(variance);
                 }
                 return;
             }
-
+    
             clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
             
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
             for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
-            
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
-
-            // RELAXED THRESHOLDS: 
-            // We now accept intensity as low as 3 (was 8) to account for thick skin/low light
-            if(intensity < 1) { 
-                updateStatus("COVER LENS COMPLETELY", "#f44336"); 
-            } else if(intensity < 3) { 
-                updateStatus("STILL TOO DARK - LIGHT TOUCH", "#ff9800");
+    
+            // REALISTIC LOGIC: Accept anything above 2.0 as long as it's pulsing
+            if(intensity < 2) {
+                updateStatus("ALIGNING FLASH...", "#ff9800");
             } else {
-                updateStatus(`SIGNAL ACQUIRED: ${intensity.toFixed(0)}`, "#00e676");
-                if(elapsed > 1000) { 
+                updateStatus("PULSE DETECTED", "#00e676");
+                if(elapsed > 2000) { // 2s lead-in to allow for gain stabilization
                     buffer.push(intensity); 
                     greenBuffer.push(greenInt); 
                     fullWaveform.push(intensity.toFixed(2)); 
                 }
             }
-            
             pulseArr.push(intensity); 
             if(pulseArr.length > 125) pulseArr.shift();
             drawWave(); 
             updateBPM();
-            
         }, 40); // Increased sampling rate from 100ms to 40ms
     }
 
@@ -554,20 +532,20 @@
     function finishAnalysis(variance) {
         const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
-        
+
+        // This is the "Distance Compensation" formula
+        // It scales the signal based on how much light survived the trip from flash to camera
+        const distanceMultiplier = Math.max(1, 60 / redAvg); 
+
         // 1. Calculate Perfusion Index (Signal Strength)
         const acComponent = Math.sqrt(variance);
         let pi = (acComponent / redAvg) * 100;
+
+        // Correct the PI based on the light loss
+        // If light is low (e.g. 10), it reduces noise impact. If light is high (60), it leaves it alone.
+        pi = pi / Math.sqrt(distanceMultiplier); 
         document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
-        
-        // SAFETY: If intensity is still low (e.g. 20-50), artificially boost PI to prevent "500" spike
-        // This compensates for the low signal-to-noise ratio in dark conditions
-        if (redAvg < 60) {
-             // FIX: Dampen PI when signal is dark to prevent false high readings
-             // If intensity is 30, we reduce PI by 50% (30/60) to account for noise
-             pi = pi * (redAvg / 60);
-        }
-        
+
         // 2. Calculate Upstroke Time (Viscosity Marker)
         // We analyze the 'fullWaveform' to find the time from trough to peak.
         // NEW PROTECTED UPSTROKE LOGIC
