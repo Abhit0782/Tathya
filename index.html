@@ -550,7 +550,7 @@
             let finalScore = (morphology.confidence * 0.7) + (intensityScore * 0.3);
 
             return { 
-                abs: Math.log(cal.bInt / snapDC), 
+                abs: Math.log(cal.bInt / snapDC) / 2.5, 
                 score: finalScore, 
                 stiffness: morphology.stiffness,
                 snap: snap,
