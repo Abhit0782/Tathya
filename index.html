@@ -567,16 +567,13 @@
              return;
         }
 
-    let predictions = topSnaps.map(s => {
-    let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
-    
-    // AI BOOST: If stiffness is > 0.7, it's a confirmed high-glucose state.
-    // Increase the multiplier to 80 to "push" the result toward the meter.
-    // Inside finishAnalysis
-    eturn p + ((s.stiffness - 0.5) * 80) + (cal.personalOffset || 0);
-    
-    return p + stiffnessAdj + (cal.personalOffset || 0);
-    });
+        let predictions = topSnaps.map(s => {
+            let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
+            
+            // AI BOOST: Stiffness Adjustment (High viscosity = High Glucose)
+            // Multiplier set to 80 to align with high-glucose states
+            return p + ((s.stiffness - 0.5) * 80) + (cal.personalOffset || 0);
+        });
 
         let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
         
