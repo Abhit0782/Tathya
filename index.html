@@ -567,11 +567,16 @@
              return;
         }
 
-        let predictions = topSnaps.map(s => {
-            let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
-            // Stiffness Adjustment: High viscosity = High Glucose
-            return p + ((s.stiffness - 0.5) * 50) + (cal.personalOffset || 0);
-        });
+    let predictions = topSnaps.map(s => {
+    let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
+    
+    // AI BOOST: If stiffness is > 0.7, it's a confirmed high-glucose state.
+    // Increase the multiplier to 80 to "push" the result toward the meter.
+    // Inside finishAnalysis
+    eturn p + ((s.stiffness - 0.5) * 80) + (cal.personalOffset || 0);
+    
+    return p + stiffnessAdj + (cal.personalOffset || 0);
+    });
 
         let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
         
@@ -785,6 +790,16 @@
     document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
     document.getElementById('statusMsg').innerText = statusText;
     document.getElementById('statusMsg').style.color = statusColor;
+
+    // ADD THIS AT THE BOTTOM OF updateUI()
+    const lastAbs = history.length > 0 ? parseFloat(history[0].absorbance) : 0;
+    
+    // Logic: If Normalized Abs is between 0.6 and 0.9, it's perfect for 90% accuracy
+    const normStatus = (lastAbs > 0.5 && lastAbs < 1.0) ? "OPTIMAL" : (lastAbs >= 1.0 ? "HIGH" : "LOW");
+    const absStatusColor = (normStatus === "OPTIMAL") ? "#00e676" : "#ffa000";
+
+    document.getElementById('sigStatus').innerHTML = 
+        `<span style="color:${absStatusColor}">ABS: ${lastAbs.toFixed(2)} (${normStatus})</span> | SYNC: ${cal.syncCount}`;
 }
 
     function hardReset() {
