@@ -214,7 +214,7 @@
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
             });
             const cloudBrain = await resp.json();
             
@@ -334,7 +334,7 @@
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
                 redirect: "follow",
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
+                body: JSON.stringify({type: "REVIVE_REQUEST", name: name, finger: currentFinger}) 
             });
             const cloudData = await resp.json();
             if (cloudData && cloudData.userFound) {
@@ -378,7 +378,7 @@
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
             });
             const brain = await resp.json();
             
@@ -568,11 +568,13 @@
         }
 
         let predictions = topSnaps.map(s => {
-            let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
-            
-            // AI BOOST: Stiffness Adjustment (High viscosity = High Glucose)
-            // Multiplier set to 80 to align with high-glucose states
-            return p + ((s.stiffness - 0.5) * 80) + (cal.personalOffset || 0);
+        let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
+        
+        // Use the 80x Stiffness multiplier we agreed on
+        let stiffnessAdj = (s.stiffness - 0.5) * 80; 
+        
+        // FIX: The 'return' must be correctly spelled and combined
+        return p + stiffnessAdj + (cal.personalOffset || 0);
         });
 
         let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
@@ -690,33 +692,25 @@
 
     function syncCal() {
         const actual = parseFloat(document.getElementById('meterVal').value);
-        if (!actual || history.length < 1) return alert("Scan first, then enter meter value.");
+        if (!actual || history.length < 1) return alert("Scan first.");
         
         const lastScan = history[0];
         const abs = parseFloat(lastScan.absorbance);
-        const pi = parseFloat(lastScan.perfusionIndex) || 1.5;
-        const visco = parseFloat(lastScan.upstrokeTime) || 120;
+        const stiffness = parseFloat(lastScan.stiffness) || 0.5;
 
-        // 1. Calculate the 'Base Prediction' (The generic model)
+        // BIOLOGICAL MATCHING: Calculate exactly what the model predicted 
+        // WITHOUT the offset, so we can find the true residual error.
         const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
+        const stiffnessImpact = (stiffness - 0.5) * 80;
         
-        // 2. Calculate the 'Biological Delta'
-        // We determine how much of the current error is due to your unique 
-        // blood viscosity (Visco) and pulse strength (PI).
-        const viscosityImpact = (visco - 120) * 0.15;
-        const personalPrediction = baseModelVal + viscosityImpact;
-
-        // 3. The New Learning: Adaptive Offset
-        // Instead of a flat correction, we learn the 'Residual Error' 
-        // after accounting for your heart and blood dynamics.
-        const newOffset = actual - personalPrediction;
+        // The new offset is the difference between reality and our AI shape-analysis
+        const newOffset = actual - (baseModelVal + stiffnessImpact);
         
-        // Weighted learning (0.8) gives priority to your newest finger prick
         const learningRate = 0.8;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
-
-        // 4. Update local history and accuracy stats
+        
+        // Update local history and accuracy stats
         history[0].actual = actual;
         const predictedVal = parseFloat(lastScan.val);
         const currentError = Math.abs(predictedVal - actual) / actual;
@@ -733,8 +727,7 @@
             actual: actual, 
             type: "SYNC", 
             offset: cal.personalOffset,
-            visco_at_sync: visco,
-            pi_at_sync: pi
+            stiffness_at_sync: stiffness
         });
         
         updateUI(); 
