@@ -530,107 +530,70 @@
     }
 
     function finishAnalysis(variance) {
-        const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+        updateStatus("AI SIFTING FOR QUALITY SNAPS...", "#ffa000");
 
-        // This is the "Distance Compensation" formula
-        // It scales the signal based on how much light survived the trip from flash to camera
-        const distanceMultiplier = Math.max(1, 60 / redAvg); 
-
-        // 1. Calculate Perfusion Index (Signal Strength)
-        const acComponent = Math.sqrt(variance);
-        let pi = (acComponent / redAvg) * 100;
-
-        // Correct the PI based on the light loss
-        // If light is low (e.g. 10), it reduces noise impact. If light is high (60), it leaves it alone.
-        pi = pi / Math.sqrt(distanceMultiplier); 
-        document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
-
-        // 2. Calculate Upstroke Time (Viscosity Marker)
-        // We analyze the 'fullWaveform' to find the time from trough to peak.
-        // NEW PROTECTED UPSTROKE LOGIC
-        let upstrokeTime = 120; // Default fallback
-        
-        // FIX: Smooth the waveform to detect peaks even in low light (Raw 12.52)
-        const numericWave = fullWaveform.map(Number);
-        const smoothedWave = applyGaussianFilter(numericWave);
-
-        if (smoothedWave.length > 20) {
-            let lastTrough = -1, lastPeak = -1;
-            // Find last valid trough/peak pair in the signal
-            for (let i = smoothedWave.length - 5; i > 1; i--) {
-                if (smoothedWave[i] < smoothedWave[i-1] && smoothedWave[i] < smoothedWave[i+1]) {
-                    lastTrough = i; break;
-                }
-            }
-            if (lastTrough > 0) {
-                for (let j = lastTrough; j < smoothedWave.length - 1; j++) {
-                    if (smoothedWave[j] > smoothedWave[j-1] && smoothedWave[j] > smoothedWave[j+1]) {
-                        lastPeak = j;
-                        break;
-                    }
-                }
-            }
-            // Only update if we found a valid positive time gap
-            if (lastPeak > lastTrough && lastTrough !== -1) {
-                upstrokeTime = Math.min(240, Math.max(60, (lastPeak - lastTrough) * 40)); 
-            }
-        }
-        document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
-
-        // 3. Autonomous Prediction Formula
-        // FIX: If intensity is low (<60), clamp the PGR multiplier to avoid exploding the result
-        let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
-        if (redAvg < 60 || greenAvg < 10) pgr = 1.0; // Force neutral multiplier in low light
-        
-        const normAbs = pi * (pgr / 2.5);
-        
-        // This adds the "Viscosity Correction" to prevent the 172 vs 141 error
-        let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
-        
-        // If viscosity is high (slower upstroke), glucose is likely higher
-        const viscosityAdjustment = (upstrokeTime - 120) * 0.15; 
-        prediction += viscosityAdjustment + (cal.personalOffset || 0);
-
-        // 4. Final HbA1c Weighting (The Anchor)
-        if (enrollmentData.hba1c) {
-            const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
-            prediction = (prediction * 0.85) + (eAG * 0.15);
+        // 1. DATA SLICING: Chop 12s scan into 3s "Snaps" (40ms sampling)
+        const SNAP_SIZE = 75; 
+        let snaps = [];
+        for (let i = 0; i < buffer.length - SNAP_SIZE; i += 25) {
+            snaps.push(buffer.slice(i, i + SNAP_SIZE));
         }
 
-        // NEW: Phantom Spike Filter (Kalman Check)
-        if (history.length > 0 && history[0].timestamp) {
-            let lastVal = parseFloat(history[0].val);
-            let timeDiff = (Date.now() - history[0].timestamp) / 60000; // Minutes
+        // 2. SCORING: Use SDPPG to find "Medical Grade" moments
+        let scoredSnaps = snaps.map(snap => {
+            let morphology = analyzePulseMorphology(snap);
+            let snapDC = snap.reduce((a, b) => a + b, 0) / snap.length;
             
-            // Biological Speed Limit: Glucose rarely moves > 3mg/dL per minute naturally
-            let maxChange = Math.max(5, 3.0 * timeDiff); 
-            let delta = prediction - lastVal;
-            
-            if (Math.abs(delta) > maxChange) {
-                // AI Smoothing: If it's a huge jump, move only halfway to the new value
-                prediction = lastVal + (Math.sign(delta) * maxChange) + (delta * 0.2);
-            }
+            // Root Cause Fix: Specifically target your 40-55 intensity range
+            // This makes the AI "wait" for the perfect bridge
+            let intensityScore = (snapDC > 30) ? 100 : (snapDC / 30) * 100;
+            let finalScore = (morphology.confidence * 0.7) + (intensityScore * 0.3);
+
+            return { 
+                abs: Math.log(cal.bInt / snapDC), 
+                score: finalScore, 
+                stiffness: morphology.stiffness,
+                snap: snap,
+                dc: snapDC
+            };
+        });
+
+        // 3. RANK & PREDICT: Only extract glucose from top 3 moments
+        scoredSnaps.sort((a, b) => b.score - a.score);
+        let topSnaps = scoredSnaps.slice(0, 3);
+        
+        if (topSnaps.length === 0) {
+             setTimeout(runAnalysis, 1000);
+             return;
         }
 
-        const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
+        let predictions = topSnaps.map(s => {
+            let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
+            // Stiffness Adjustment: High viscosity = High Glucose
+            return p + ((s.stiffness - 0.5) * 50) + (cal.personalOffset || 0);
+        });
 
-        // 5. Package for Batch & Cloud
+        let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
+        
+        // Compatibility for finalizeBatch
+        let best = topSnaps[0];
+        let snapVar = getVariance(best.snap);
+        let pi = (Math.sqrt(snapVar) / best.dc) * 100;
+        
         sessionBuffer.push({ 
             val: finalVal, 
-            abs: normAbs, 
-            pi: pi, 
-            upstroke: upstrokeTime, 
-            raw: redAvg,
-            noise: variance,
-            wave: fullWaveform 
+            abs: best.abs, 
+            noise: 100 - best.score,
+            raw: best.dc,
+            pi: pi,
+            upstroke: 120, 
+            wave: best.snap.map(n => n.toFixed(2))
         });
 
         // Handle Batch Logic (Best of 5)
         if (sessionBuffer.length < 5) {
             document.getElementById('gluResult').innerText = finalVal;
-            updateStatus(`SYNCING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
-            setTimeout(runAnalysis, 1200);
+            setTimeout(runAnalysis, 1000);
         } else {
             finalizeBatch();
         }
@@ -638,27 +601,25 @@
 
     // AI Function: Pulse Morphology Analysis
     function analyzePulseMorphology(waveform) {
-        const n = waveform.length;
-        if (n < 10) return { stiffness: 0.5, kurtosis: 0 };
-
+        if (waveform.length < 20) return { stiffness: 0.5, confidence: 0, kurtosis: 0 };
+        
         // 1. Calculate Acceleration (Second Derivative)
         let acceleration = [];
-        for (let i = 2; i < n - 2; i++) {
-            let acc = (waveform[i+2] - 2*waveform[i] + waveform[i-2]);
-            acceleration.push(acc);
+        for (let i = 2; i < waveform.length - 2; i++) {
+            acceleration.push(waveform[i+2] - 2*waveform[i] + waveform[i-2]);
         }
 
-        // 2. Identify 'a' wave (Peak) and 'b' wave (Early dip)
+        // 2. Identify a-wave (peak) and b-wave (dip)
         let a_wave = Math.max(...acceleration);
         let b_wave = Math.min(...acceleration);
+        let stiffness = Math.abs(b_wave / (a_wave || 0.001));
         
-        // Vascular Stiffness Index (Strongly correlates to glucose-induced viscosity)
-        let stiffness = Math.abs(b_wave / (a_wave || 1));
-        
-        return {
-            stiffness: stiffness,
-            kurtosis: calculateKurtosis(waveform) // Measure of pulse "sharpness"
-        };
+        // 3. Score Stability: High variance in acceleration = Motion Artifact
+        let accMean = acceleration.reduce((a,b)=>a+b,0)/acceleration.length;
+        let accVar = acceleration.reduce((a,b)=>a+(b-accMean)**2,0)/acceleration.length;
+        let confidence = Math.max(0, 100 - (Math.sqrt(accVar) * 50));
+
+        return { stiffness: stiffness, confidence: confidence, kurtosis: calculateKurtosis(waveform) };
     }
 
     function calculateKurtosis(values) {
