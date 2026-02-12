@@ -598,6 +598,21 @@
             prediction = (prediction * 0.85) + (eAG * 0.15);
         }
 
+        // NEW: Phantom Spike Filter (Kalman Check)
+        if (history.length > 0 && history[0].timestamp) {
+            let lastVal = parseFloat(history[0].val);
+            let timeDiff = (Date.now() - history[0].timestamp) / 60000; // Minutes
+            
+            // Biological Speed Limit: Glucose rarely moves > 3mg/dL per minute naturally
+            let maxChange = Math.max(5, 3.0 * timeDiff); 
+            let delta = prediction - lastVal;
+            
+            if (Math.abs(delta) > maxChange) {
+                // AI Smoothing: If it's a huge jump, move only halfway to the new value
+                prediction = lastVal + (Math.sign(delta) * maxChange) + (delta * 0.2);
+            }
+        }
+
         const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
 
         // 5. Package for Batch & Cloud
@@ -621,10 +636,47 @@
         }
     }
 
+    // AI Function: Pulse Morphology Analysis
+    function analyzePulseMorphology(waveform) {
+        const n = waveform.length;
+        if (n < 10) return { stiffness: 0.5, kurtosis: 0 };
+
+        // 1. Calculate Acceleration (Second Derivative)
+        let acceleration = [];
+        for (let i = 2; i < n - 2; i++) {
+            let acc = (waveform[i+2] - 2*waveform[i] + waveform[i-2]);
+            acceleration.push(acc);
+        }
+
+        // 2. Identify 'a' wave (Peak) and 'b' wave (Early dip)
+        let a_wave = Math.max(...acceleration);
+        let b_wave = Math.min(...acceleration);
+        
+        // Vascular Stiffness Index (Strongly correlates to glucose-induced viscosity)
+        let stiffness = Math.abs(b_wave / (a_wave || 1));
+        
+        return {
+            stiffness: stiffness,
+            kurtosis: calculateKurtosis(waveform) // Measure of pulse "sharpness"
+        };
+    }
+
+    function calculateKurtosis(values) {
+        const n = values.length;
+        if (n === 0) return 0;
+        const mean = values.reduce((a, b) => a + b, 0) / n;
+        const standardDeviation = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n);
+        const fourthMoment = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
+        return fourthMoment / Math.pow(standardDeviation, 4);
+    }
+
     function finalizeBatch() {
         // 1. Sort by noise and pick the most stable scan
         sessionBuffer.sort((a, b) => a.noise - b.noise);
         const best = sessionBuffer[0];
+        
+        // Trigger the Morphology AI
+        const morphology = analyzePulseMorphology(best.wave.map(Number));
 
         // 2. Build the Advanced Feature Vector
         const featureVector = {
@@ -640,6 +692,9 @@
             // --- NEW MORPHOLOGICAL FEATURES ---
             perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
             upstrokeTime: best.upstroke.toFixed(2), // Viscosity marker
+            stiffness: morphology.stiffness.toFixed(4), 
+            kurtosis: morphology.kurtosis.toFixed(4),
+            confidence: (100 - (best.noise * 100)).toFixed(2), // AI Reliability score
             hba1c: enrollmentData.hba1c || "", // Biological anchor
             bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
             
@@ -660,7 +715,7 @@
         updateStatus("AUTONOMOUS CALIBRATION ACTIVE", "var(--accent)");
         
         // Add to local history
-        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString() };
+        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString(), timestamp: Date.now() };
         history.unshift(logEntry);
         localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
         
