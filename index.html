@@ -181,28 +181,30 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
-        try {
-            // 1. Start the camera first to establish "Trust" with the browser
-            await setupCamera();
+        // ... existing camera setup ...
+        if(enrollmentData) {
+            await refreshIntelligence(); // Force check DB on startup
+        }
 
-            // 2. NOW ask for the full list of lenses
+        try {
             const d = await navigator.mediaDevices.enumerateDevices();
             devices = d.filter(i => i.kind === 'videoinput');
-            
-            console.log("Hardware Found:", devices.length, "lenses");
-
-            // 3. Continue with your successful Revive logic
+            await setupCamera();
             if(!enrollmentData) {
                 document.getElementById('enrollModal').classList.add('visible');
             } else {
-                reviveFromCloud(enrollmentData.name, false);
+                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
             }
             
+            // Initialize Finger UI
             document.getElementById('fingerSelector').value = currentFinger;
+            if (!fingerProfiles[currentFinger]) {
+                // If this finger has no profile, init it with current cal or default
+                fingerProfiles[currentFinger] = cal;
+            }
+            
             updateUI(); drawTrend(); renderLog();
-        } catch(e) { 
-            console.warn("Camera init failed, handled in setupCamera"); 
-        }
+        } catch(e) { alert("Camera Permission Required"); }
     }
 
     // Add this function to fetch intelligence before every scan or on startup
@@ -212,7 +214,7 @@
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
             });
             const cloudBrain = await resp.json();
             
@@ -225,49 +227,16 @@
             
             console.log("Brain refreshed from DB. Sync Level:", cal.syncCount);
             updateUI();
-        //} catch(e) { console.error("Cloud check failed, using last known state."); }
-        // Replace your current catch block with this:
-       } catch(e) { 
-          alert("CRITICAL ERROR: " + e.name + " - " + e.message); 
-          console.error(e);
-}
+        } catch(e) { console.error("Cloud check failed, using last known state."); }
     }
 
- async function setupCamera() {
-    if(stream) { stream.getTracks().forEach(t => t.stop()); }
-    
-    // We use the devices array from the init() function
-    const selectedDevice = devices[cameraIdx];
-    
-    const constraints = { 
-        video: { 
-            // We use 'ideal' instead of 'exact' to prevent crashes 
-            // if device IDs changed after your browser reset.
-            deviceId: selectedDevice ? { ideal: selectedDevice.deviceId } : undefined,
-            facingMode: 'environment', 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 } 
-        } 
-    };
-
-    try {
+    async function setupCamera() {
+        if(stream) { stream.getTracks().forEach(t => t.stop()); }
+        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } };
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = stream;
         ve.srcObject = stream;
-        
-        // Confirm successful link
-        const track = stream.getVideoTracks()[0];
-        console.log("Active Lens:", track.label);
-        updateStatus("CAMERA LINKED", "#00e676");
-    } catch(e) {
-        // AI Debug: This tells us if it's really a Permission or a Hardware issue
-        if (e.name === "NotAllowedError") {
-            alert("SECURITY: Please click the lock icon in the URL bar and 'Allow' Camera.");
-        } else {
-            alert("HARDWARE ERROR: " + e.name + ". Please close other camera apps.");
-        }
     }
-}
 
     async function toggleFlash() {
         if(!stream) return;
@@ -280,20 +249,9 @@
         } catch(e) { alert("Flash not supported on this lens."); torch = false; }
     }
 
-    async function toggleLens() {
-        if (devices.length < 2) {
-            // If we only see one lens, try to re-scan hardware once more
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-        }
-        
-        if (devices.length > 1) {
-            cameraIdx = (cameraIdx + 1) % devices.length;
-            await setupCamera();
-            updateStatus(`SWITCHED TO LENS ${cameraIdx + 1}`, "var(--blue)");
-        } else {
-            alert("No other lenses detected by the browser yet.");
-        }
+    function toggleLens() {
+        cameraIdx = (cameraIdx + 1) % devices.length;
+        setupCamera();
     }
 
     function changeFinger() {
@@ -370,44 +328,33 @@
         }
     }
 
-async function reviveFromCloud(name, showAlert) {
+  async function reviveFromCloud(name, showAlert) {
         try {
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
                 redirect: "follow",
-                // NEW: We send type "IDENTITY_CHECK" to tell the cloud to find ANY finger data for this name
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name, checkAllFingers: true}) 
+                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
             });
             const cloudData = await resp.json();
-            
             if (cloudData && cloudData.userFound) {
-                // Restore the coefficients from your best finger
+                // Switched to new non-linear model from the cloud
                 cal.coefA = cloudData.coefA;
                 cal.coefB = cloudData.coefB;
                 cal.intercept = cloudData.intercept;
                 cal.personalOffset = cloudData.personalOffset;
                 cal.syncCount = cloudData.syncCount;
-                
-                // AUTO-SWITCH: If the cloud says your data is on Right Index, we switch the UI
-                if(cloudData.lastFinger && cloudData.lastFinger !== currentFinger) {
-                    currentFinger = cloudData.lastFinger;
-                    document.getElementById('fingerSelector').value = currentFinger;
-                    localStorage.setItem('tathya_current_finger', currentFinger);
-                }
-
-                cal = sanitizeCal(cal);
-                saveCal();
+                cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
+                saveCal(); // Save to both global and finger profile
                 updateUI();
-                
                 if (showAlert) {
-                    alert(`Welcome Back ${name}! Restored ${currentFinger} Profile (Sync Level ${cal.syncCount})`);
+                    alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
                 }
                 return true;
             }
             return false;
         } catch(e) {
-            console.warn("Sync failed, check internet connection.");
+            console.log("New user or offline mode. Starting fresh.");
             return false;
         }
     }
@@ -431,7 +378,7 @@ async function reviveFromCloud(name, showAlert) {
             const resp = await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
+                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
             });
             const brain = await resp.json();
             
@@ -583,74 +530,101 @@ async function reviveFromCloud(name, showAlert) {
     }
 
     function finishAnalysis(variance) {
-        updateStatus("AI ANALYZING PULSE...", "#ffa000");
-        const SNAP_SIZE = 75; 
-        let snaps = [];
-        for (let i = 0; i < buffer.length - SNAP_SIZE; i += 25) {
-            snaps.push(buffer.slice(i, i + SNAP_SIZE));
+        const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+
+        // This is the "Distance Compensation" formula
+        // It scales the signal based on how much light survived the trip from flash to camera
+        const distanceMultiplier = Math.max(1, 60 / redAvg); 
+
+        // 1. Calculate Perfusion Index (Signal Strength)
+        const acComponent = Math.sqrt(variance);
+        let pi = (acComponent / redAvg) * 100;
+
+        // Correct the PI based on the light loss
+        // If light is low (e.g. 10), it reduces noise impact. If light is high (60), it leaves it alone.
+        pi = pi / Math.sqrt(distanceMultiplier); 
+        document.getElementById('statPI').innerText = `PI: ${pi.toFixed(2)}%`;
+
+        // 2. Calculate Upstroke Time (Viscosity Marker)
+        // We analyze the 'fullWaveform' to find the time from trough to peak.
+        // NEW PROTECTED UPSTROKE LOGIC
+        let upstrokeTime = 120; // Default fallback
+        
+        // FIX: Smooth the waveform to detect peaks even in low light (Raw 12.52)
+        const numericWave = fullWaveform.map(Number);
+        const smoothedWave = applyGaussianFilter(numericWave);
+
+        if (smoothedWave.length > 20) {
+            let lastTrough = -1, lastPeak = -1;
+            // Find last valid trough/peak pair in the signal
+            for (let i = smoothedWave.length - 5; i > 1; i--) {
+                if (smoothedWave[i] < smoothedWave[i-1] && smoothedWave[i] < smoothedWave[i+1]) {
+                    lastTrough = i; break;
+                }
+            }
+            if (lastTrough > 0) {
+                for (let j = lastTrough; j < smoothedWave.length - 1; j++) {
+                    if (smoothedWave[j] > smoothedWave[j-1] && smoothedWave[j] > smoothedWave[j+1]) {
+                        lastPeak = j;
+                        break;
+                    }
+                }
+            }
+            // Only update if we found a valid positive time gap
+            if (lastPeak > lastTrough && lastTrough !== -1) {
+                upstrokeTime = Math.min(240, Math.max(60, (lastPeak - lastTrough) * 40)); 
+            }
+        }
+        document.getElementById('statVisco').innerText = `VISCO: ${upstrokeTime}ms`;
+
+        // 3. Autonomous Prediction Formula
+        // FIX: If intensity is low (<60), clamp the PGR multiplier to avoid exploding the result
+        let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
+        if (redAvg < 60 || greenAvg < 10) pgr = 1.0; // Force neutral multiplier in low light
+        
+        const normAbs = pi * (pgr / 2.5);
+        
+        // This adds the "Viscosity Correction" to prevent the 172 vs 141 error
+        let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        
+        // If viscosity is high (slower upstroke), glucose is likely higher
+        const viscosityAdjustment = (upstrokeTime - 120) * 0.15; 
+        prediction += viscosityAdjustment + (cal.personalOffset || 0);
+
+        // 4. Final HbA1c Weighting (The Anchor)
+        if (enrollmentData.hba1c) {
+            const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
+            prediction = (prediction * 0.85) + (eAG * 0.15);
         }
 
-        let scoredSnaps = snaps.map(snap => {
-            let snapDC = snap.reduce((a, b) => a + b, 0) / snap.length;
-            let score = (snapDC > 30) ? 100 : (snapDC / 30) * 100;
-            return { abs: Math.log(cal.bInt / snapDC) / 2.5, score: score, dc: snapDC, snap: snap };
+        const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
+
+        // 5. Package for Batch & Cloud
+        sessionBuffer.push({ 
+            val: finalVal, 
+            abs: normAbs, 
+            pi: pi, 
+            upstroke: upstrokeTime, 
+            raw: redAvg,
+            noise: variance,
+            wave: fullWaveform 
         });
 
-        scoredSnaps.sort((a, b) => b.score - a.score);
-        let best = scoredSnaps[0];
-
-        // REMOVED STIFFNESS ADJUSTMENT
-        let finalVal = Math.round((cal.coefA * Math.pow(best.abs, 2)) + (cal.coefB * best.abs) + cal.intercept + (cal.personalOffset || 0));
-        
-        sessionBuffer.push({ val: finalVal, abs: best.abs, noise: 100 - best.score, raw: best.dc, upstroke: 120, wave: best.snap.map(n => n.toFixed(2)) });
-
+        // Handle Batch Logic (Best of 5)
         if (sessionBuffer.length < 5) {
             document.getElementById('gluResult').innerText = finalVal;
-            setTimeout(runAnalysis, 1000);
+            updateStatus(`SYNCING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
+            setTimeout(runAnalysis, 1200);
         } else {
             finalizeBatch();
         }
-    }
-
-    // AI Function: Pulse Morphology Analysis
-    function analyzePulseMorphology(waveform) {
-        if (waveform.length < 20) return { stiffness: 0.5, confidence: 0, kurtosis: 0 };
-        
-        // 1. Calculate Acceleration (Second Derivative)
-        let acceleration = [];
-        for (let i = 2; i < waveform.length - 2; i++) {
-            acceleration.push(waveform[i+2] - 2*waveform[i] + waveform[i-2]);
-        }
-
-        // 2. Identify a-wave (peak) and b-wave (dip)
-        let a_wave = Math.max(...acceleration);
-        let b_wave = Math.min(...acceleration);
-        let stiffness = Math.abs(b_wave / (a_wave || 0.001));
-        
-        // 3. Score Stability: High variance in acceleration = Motion Artifact
-        let accMean = acceleration.reduce((a,b)=>a+b,0)/acceleration.length;
-        let accVar = acceleration.reduce((a,b)=>a+(b-accMean)**2,0)/acceleration.length;
-        let confidence = Math.max(0, 100 - (Math.sqrt(accVar) * 50));
-
-        return { stiffness: stiffness, confidence: confidence, kurtosis: calculateKurtosis(waveform) };
-    }
-
-    function calculateKurtosis(values) {
-        const n = values.length;
-        if (n === 0) return 0;
-        const mean = values.reduce((a, b) => a + b, 0) / n;
-        const standardDeviation = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n);
-        const fourthMoment = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
-        return fourthMoment / Math.pow(standardDeviation, 4);
     }
 
     function finalizeBatch() {
         // 1. Sort by noise and pick the most stable scan
         sessionBuffer.sort((a, b) => a.noise - b.noise);
         const best = sessionBuffer[0];
-        
-        // Trigger the Morphology AI
-        const morphology = analyzePulseMorphology(best.wave.map(Number));
 
         // 2. Build the Advanced Feature Vector
         const featureVector = {
@@ -666,9 +640,6 @@ async function reviveFromCloud(name, showAlert) {
             // --- NEW MORPHOLOGICAL FEATURES ---
             perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
             upstrokeTime: best.upstroke.toFixed(2), // Viscosity marker
-            stiffness: morphology.stiffness.toFixed(4), 
-            kurtosis: morphology.kurtosis.toFixed(4),
-            confidence: (100 - (best.noise * 100)).toFixed(2), // AI Reliability score
             hba1c: enrollmentData.hba1c || "", // Biological anchor
             bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
             
@@ -689,7 +660,7 @@ async function reviveFromCloud(name, showAlert) {
         updateStatus("AUTONOMOUS CALIBRATION ACTIVE", "var(--accent)");
         
         // Add to local history
-        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString(), timestamp: Date.now() };
+        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString() };
         history.unshift(logEntry);
         localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
         
@@ -701,23 +672,56 @@ async function reviveFromCloud(name, showAlert) {
 
     function syncCal() {
         const actual = parseFloat(document.getElementById('meterVal').value);
-        if (!actual || history.length < 1) return alert("Scan first.");
+        if (!actual || history.length < 1) return alert("Scan first, then enter meter value.");
         
         const lastScan = history[0];
         const abs = parseFloat(lastScan.absorbance);
+        const pi = parseFloat(lastScan.perfusionIndex) || 1.5;
+        const visco = parseFloat(lastScan.upstrokeTime) || 120;
 
-        // REMOVED STIFFNESS FROM SYNC MATH
+        // 1. Calculate the 'Base Prediction' (The generic model)
         const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        const newOffset = actual - baseModelVal;
         
+        // 2. Calculate the 'Biological Delta'
+        // We determine how much of the current error is due to your unique 
+        // blood viscosity (Visco) and pulse strength (PI).
+        const viscosityImpact = (visco - 120) * 0.15;
+        const personalPrediction = baseModelVal + viscosityImpact;
+
+        // 3. The New Learning: Adaptive Offset
+        // Instead of a flat correction, we learn the 'Residual Error' 
+        // after accounting for your heart and blood dynamics.
+        const newOffset = actual - personalPrediction;
+        
+        // Weighted learning (0.8) gives priority to your newest finger prick
         const learningRate = 0.8;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
-        
+
+        // 4. Update local history and accuracy stats
+        history[0].actual = actual;
+        const predictedVal = parseFloat(lastScan.val);
+        const currentError = Math.abs(predictedVal - actual) / actual;
+        const currentAcc = Math.max(0, 100 - (currentError * 100));
+        const prevCount = cal.syncCount - 1;
+        const currentAvg = cal.finalAccuracyPercent || 0;
+        cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
+
         saveCal(); // Persist the updated 'cal' object for the current finger
-        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", personalOffset: cal.personalOffset });
-        updateUI(); renderLog(); 
-        alert("Sync Successful!");
+        
+        // Push the 'Complete Feature Set' to the cloud for AI training
+        pushToCloud({ 
+            ...lastScan, 
+            actual: actual, 
+            type: "SYNC", 
+            offset: cal.personalOffset,
+            visco_at_sync: visco,
+            pi_at_sync: pi
+        });
+        
+        updateUI(); 
+        renderLog(); 
+        alert(`Sync Successful! Biological Offset: ${cal.personalOffset.toFixed(1)} mg/dL. System is now more 'Autonomous'.`);
     }
 
     function saveCal() {
@@ -765,16 +769,6 @@ async function reviveFromCloud(name, showAlert) {
     document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
     document.getElementById('statusMsg').innerText = statusText;
     document.getElementById('statusMsg').style.color = statusColor;
-
-    // ADD THIS AT THE BOTTOM OF updateUI()
-    const lastAbs = history.length > 0 ? parseFloat(history[0].absorbance) : 0;
-    
-    // Logic: If Normalized Abs is between 0.6 and 0.9, it's perfect for 90% accuracy
-    const normStatus = (lastAbs > 0.5 && lastAbs < 1.0) ? "OPTIMAL" : (lastAbs >= 1.0 ? "HIGH" : "LOW");
-    const absStatusColor = (normStatus === "OPTIMAL") ? "#00e676" : "#ffa000";
-
-    document.getElementById('sigStatus').innerHTML = 
-        `<span style="color:${absStatusColor}">ABS: ${lastAbs.toFixed(2)} (${normStatus})</span> | SYNC: ${cal.syncCount}`;
 }
 
     function hardReset() {
