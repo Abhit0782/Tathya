@@ -754,7 +754,7 @@ async function reviveFromCloud(name, showAlert) {
         // BIOLOGICAL MATCHING: Calculate exactly what the model predicted 
         // WITHOUT the offset, so we can find the true residual error.
         const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        const stiffnessImpact = (stiffness - 0.5) * 80;
+        const stiffnessImpact = (stiffness - 0.5) * 110;
         
         // The new offset is the difference between reality and our AI shape-analysis
         const newOffset = actual - (baseModelVal + stiffnessImpact);
