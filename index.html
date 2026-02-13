@@ -231,11 +231,33 @@
     }
 
     async function setupCamera() {
-        if(stream) { stream.getTracks().forEach(t => t.stop()); }
-        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream;
-        ve.srcObject = stream;
+        if (stream) {
+            stream.getTracks().forEach(t => t.stop());
+        }
+
+        // OnePlus 12 compatibility: Use 'environment' for back lens
+        const constraints = {
+            video: {
+                facingMode: { ideal: "environment" },
+                // Lowering ideal resolution for initial connection stability
+                width: { ideal: 640 }, 
+                height: { ideal: 480 }
+            }
+        };
+
+        try {
+            // Force the browser to wait for the hardware to wake up
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            v.srcObject = stream;
+            ve.srcObject = stream;
+            
+            // Ensure playback actually starts
+            v.onloadedmetadata = () => v.play();
+        } catch (e) {
+            console.error("Camera Hardware Error:", e);
+            // On OnePlus, if this fails, it usually means the lens is 'busy'
+            alert("Lens busy or blocked. Try restarting the browser tab.");
+        }
     }
 
     async function toggleFlash() {
