@@ -235,13 +235,41 @@
 }
     }
 
-    async function setupCamera() {
-        if(stream) { stream.getTracks().forEach(t => t.stop()); }
-        const constraints = { video: { deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined, facingMode: 'environment', width: {ideal: 1280}, height: {ideal: 720} } };
+ async function setupCamera() {
+    if(stream) { stream.getTracks().forEach(t => t.stop()); }
+    
+    // We use the devices array from the init() function
+    const selectedDevice = devices[cameraIdx];
+    
+    const constraints = { 
+        video: { 
+            // We use 'ideal' instead of 'exact' to prevent crashes 
+            // if device IDs changed after your browser reset.
+            deviceId: selectedDevice ? { ideal: selectedDevice.deviceId } : undefined,
+            facingMode: 'environment', 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 } 
+        } 
+    };
+
+    try {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         v.srcObject = stream;
         ve.srcObject = stream;
+        
+        // Confirm successful link
+        const track = stream.getVideoTracks()[0];
+        console.log("Active Lens:", track.label);
+        updateStatus("CAMERA LINKED", "#00e676");
+    } catch(e) {
+        // AI Debug: This tells us if it's really a Permission or a Hardware issue
+        if (e.name === "NotAllowedError") {
+            alert("SECURITY: Please click the lock icon in the URL bar and 'Allow' Camera.");
+        } else {
+            alert("HARDWARE ERROR: " + e.name + ". Please close other camera apps.");
+        }
     }
+}
 
     async function toggleFlash() {
         if(!stream) return;
