@@ -181,30 +181,34 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
-        // ... existing camera setup ...
         if(enrollmentData) {
-            await refreshIntelligence(); // Force check DB on startup
+            await refreshIntelligence();
         }
 
         try {
+            // Step 1: Get initial permission to see the full device list
+            await navigator.mediaDevices.getUserMedia({ video: true });
             const d = await navigator.mediaDevices.enumerateDevices();
+            
+            // Step 2: Filter specifically for video inputs
             devices = d.filter(i => i.kind === 'videoinput');
+            
+            // Step 3: Populate a debug list or selector if you want to see all lenses
+            console.log("Detected Lenses:", devices.map(dev => dev.label));
+
             await setupCamera();
+            
             if(!enrollmentData) {
                 document.getElementById('enrollModal').classList.add('visible');
             } else {
-                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
+                reviveFromCloud(enrollmentData.name, false);
             }
             
-            // Initialize Finger UI
             document.getElementById('fingerSelector').value = currentFinger;
-            if (!fingerProfiles[currentFinger]) {
-                // If this finger has no profile, init it with current cal or default
-                fingerProfiles[currentFinger] = cal;
-            }
-            
             updateUI(); drawTrend(); renderLog();
-        } catch(e) { alert("Camera Permission Required"); }
+        } catch(e) { 
+            alert("Camera Initialization Failed. Please ensure permissions are granted."); 
+        }
     }
 
     // Add this function to fetch intelligence before every scan or on startup
@@ -231,32 +235,31 @@
     }
 
     async function setupCamera() {
-        if (stream) {
-            stream.getTracks().forEach(t => t.stop());
-        }
-
-        // OnePlus 12 compatibility: Use 'environment' for back lens
-        const constraints = {
-            video: {
-                facingMode: { ideal: "environment" },
-                // Lowering ideal resolution for initial connection stability
-                width: { ideal: 640 }, 
-                height: { ideal: 480 }
-            }
+        if(stream) { stream.getTracks().forEach(t => t.stop()); }
+        
+        // Attempt to target the 'Primary' lens (usually the first 'environment' device)
+        const constraints = { 
+            video: { 
+                deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
+                facingMode: 'environment', 
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 } 
+            } 
         };
 
         try {
-            // Force the browser to wait for the hardware to wake up
             stream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = stream;
             ve.srcObject = stream;
             
-            // Ensure playback actually starts
-            v.onloadedmetadata = () => v.play();
-        } catch (e) {
-            console.error("Camera Hardware Error:", e);
-            // On OnePlus, if this fails, it usually means the lens is 'busy'
-            alert("Lens busy or blocked. Try restarting the browser tab.");
+            // Trigger play to ensure it's active
+            v.play(); 
+        } catch(e) {
+            // Fallback for OnePlus 12: If 'exact' device ID fails, use general environment
+            console.warn("Direct lens access failed, falling back to general back camera.");
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            v.srcObject = stream;
+            ve.srcObject = stream;
         }
     }
 
