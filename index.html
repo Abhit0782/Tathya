@@ -181,30 +181,28 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
-        // ... existing camera setup ...
-        if(enrollmentData) {
-            await refreshIntelligence(); // Force check DB on startup
-        }
-
         try {
+            // 1. Start the camera first to establish "Trust" with the browser
+            await setupCamera();
+
+            // 2. NOW ask for the full list of lenses
             const d = await navigator.mediaDevices.enumerateDevices();
             devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera();
+            
+            console.log("Hardware Found:", devices.length, "lenses");
+
+            // 3. Continue with your successful Revive logic
             if(!enrollmentData) {
                 document.getElementById('enrollModal').classList.add('visible');
             } else {
-                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
+                reviveFromCloud(enrollmentData.name, false);
             }
             
-            // Initialize Finger UI
             document.getElementById('fingerSelector').value = currentFinger;
-            if (!fingerProfiles[currentFinger]) {
-                // If this finger has no profile, init it with current cal or default
-                fingerProfiles[currentFinger] = cal;
-            }
-            
             updateUI(); drawTrend(); renderLog();
-        } catch(e) { alert("Camera Permission Required"); }
+        } catch(e) { 
+            console.warn("Camera init failed, handled in setupCamera"); 
+        }
     }
 
     // Add this function to fetch intelligence before every scan or on startup
@@ -282,9 +280,20 @@
         } catch(e) { alert("Flash not supported on this lens."); torch = false; }
     }
 
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
+    async function toggleLens() {
+        if (devices.length < 2) {
+            // If we only see one lens, try to re-scan hardware once more
+            const d = await navigator.mediaDevices.enumerateDevices();
+            devices = d.filter(i => i.kind === 'videoinput');
+        }
+        
+        if (devices.length > 1) {
+            cameraIdx = (cameraIdx + 1) % devices.length;
+            await setupCamera();
+            updateStatus(`SWITCHED TO LENS ${cameraIdx + 1}`, "var(--blue)");
+        } else {
+            alert("No other lenses detected by the browser yet.");
+        }
     }
 
     function changeFinger() {
@@ -615,7 +624,7 @@ async function reviveFromCloud(name, showAlert) {
         let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
         
         // Use the 80x Stiffness multiplier we agreed on
-        let stiffnessAdj = (s.stiffness - 0.5) * 80; 
+        let stiffnessAdj = (s.stiffness - 0.5) * 110; 
         
         // FIX: The 'return' must be correctly spelled and combined
         return p + stiffnessAdj + (cal.personalOffset || 0);
