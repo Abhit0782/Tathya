@@ -227,7 +227,12 @@
             
             console.log("Brain refreshed from DB. Sync Level:", cal.syncCount);
             updateUI();
-        } catch(e) { console.error("Cloud check failed, using last known state."); }
+        //} catch(e) { console.error("Cloud check failed, using last known state."); }
+        // Replace your current catch block with this:
+       } catch(e) { 
+          alert("CRITICAL ERROR: " + e.name + " - " + e.message); 
+          console.error(e);
+}
     }
 
     async function setupCamera() {
