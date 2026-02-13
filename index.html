@@ -1,863 +1,150 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Tathya </title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <link rel="manifest" href="manifest.json">
-    <style>
-        :root { --accent: #00e676; --bg: #0a0a0a; --card: #161616; --blue: #2196f3; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: #fff; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; overflow-x: hidden; }
-        
-        /* Identity Enrollment UI */
-        #enrollModal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
-        #enrollModal.visible { display: flex; }
-        .modal-input { width: 100%; padding: 15px; background: #111; border: 1px solid var(--blue); color: white; border-radius: 10px; margin: 15px 0; font-size: 16px; text-align: center; }
-        
-        .enroll-box { width: 160px; height: 160px; border: 3px solid #333; border-radius: 50%; margin: 10px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #000; position: relative; }
-        #v_enroll { width: 100%; height: 100%; object-fit: cover; }
-        
-        /* Controls & Rings */
-        .bio-ring-container { position: relative; width: 280px; height: 280px; margin: 10px 0; display: flex; align-items: center; justify-content: center; }
-        .progress-ring { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
-        .progress-ring__circle { stroke: var(--accent); stroke-dasharray: 816; stroke-dashoffset: 816; transition: stroke-dashoffset 0.1s linear; stroke-linecap: round; }
-        .progress-ring__track { stroke: #222; }
-        
-        .inner-display { position: absolute; width: 220px; height: 220px; border-radius: 50%; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #222; }
-        #v { position: absolute; width: 100%; height: 100%; object-fit: cover; opacity: 0.4; filter: grayscale(1); }
-        
-        /* Fixed Pulse Graph in Center */
-        #pulseGraph { position: absolute; width: 100%; height: 80px; bottom: 20px; z-index: 5; pointer-events: none; }
-        
-        .result-text { font-size: 60px; font-weight: 800; color: var(--accent); margin: 0; z-index: 10; position: relative; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
-        .unit-text { font-size: 12px; color: #666; letter-spacing: 2px; z-index: 10; margin-top: -5px; }
-        .timer-text { font-size: 18px; color: #fff; font-weight: bold; z-index: 10; margin-bottom: 5px; }
-
-        .controls { display: flex; gap: 10px; width: 100%; max-width: 400px; margin-bottom: 15px; }
-        .btn-small { flex: 1; background: var(--card); border: 1px solid #333; color: #aaa; padding: 12px; border-radius: 12px; font-size: 11px; cursor: pointer; font-weight: bold; }
-        .btn-small.active { background: #ffa000; color: #000; border-color: #ffa000; }
-        
-        .btn-main { width: 100%; max-width: 400px; padding: 20px; border-radius: 16px; border: none; background: var(--accent); color: #000; font-size: 18px; font-weight: bold; cursor: pointer; }
-        .btn-main:disabled { background: #222; color: #444; }
-
-        .cal-bar-container { width: 100%; max-width: 400px; height: 6px; background: #222; border-radius: 3px; margin-top: 15px; overflow: hidden; }
-        #calBar { width: 0%; height: 100%; background: #f44336; transition: width 0.5s; }
-        
-        .trend-card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 15px; margin-top: 15px; border: 1px solid #222; box-sizing: border-box; }
-        #trendCanvas { width: 100%; height: 100px; }
-        
-        .card { width: 100%; max-width: 400px; background: var(--card); border-radius: 20px; padding: 20px; margin-top: 15px; box-sizing: border-box; border: 1px solid #222; }
-        .log-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #222; font-size: 13px; }
-    </style>
-</head>
-<body>
-
-    <div id="enrollModal">
-        <h2 style="color:var(--accent); margin:0;">TATHYA IDENTITY</h2>
-        <div id="nameSection">
-            <p style="font-size:14px; color:#aaa;">Enter name for Global Cloud Learning</p>
-            <input type="text" id="userName" class="modal-input" placeholder="User Name">
-            <input type="number" id="userHbA1c" class="modal-input" placeholder="HbA1c (Optional, e.g. 5.7)" step="0.1">
-            <button onclick="startEnrollmentProcess()" class="btn-main">CONTINUE</button>
-        </div>
-        <div id="fingerSection" style="display:none;">
-            <div class="enroll-box">
-                <video id="v_enroll" autoplay playsinline muted></video>
-                <div id="enrollCounter" style="position:absolute; font-size:40px; font-weight:900; color:var(--accent);"></div>
-            </div>
-            <div id="enrollFingerName" style="color:var(--blue); font-weight:bold; letter-spacing:1px; margin-bottom:5px;">LEFT THUMB</div>
-            <div class="controls" style="margin-bottom:10px;">
-                <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-                <button class="btn-small" id="enrollFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
-            </div>
-            <button id="enrollBtn" onclick="startEnrollStep()" class="btn-main">SCAN FINGER</button>
-        </div>
-    </div>
-
-    <h2 style="margin:0; font-weight: 400; color: var(--accent);">TATHYA <span style="font-weight: 800;">PRO</span></h2>
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+  
+  if (sheet.getLastRow() === 0) {
+    // Expanded Headers for Machine Learning
+    var headers = [
+      "Timestamp", "User Name", "Type", "Predicted", "Raw_DC", "Actual_Meter", 
+      "Noise", "Absorbance", "PerfusionIndex", "UpstrokeTime", "BPM", 
+      "Finger", "HbA1c", "CoefA", "CoefB", "Intercept", "Offset", "Waveform"
+    ];
+    sheet.appendRow(headers);
+  }
+  
+  // --- NEW: BIOLOGICAL VALIDATION LAYER ---
+  // We sanitize the incoming data to ensure the regression isn't corrupted
+  var upstroke = parseFloat(data.upstrokeTime);
+  var isValidBio = (upstroke > 40 && upstroke < 300); // Only allow human-possible times
+  
+  if (data.type === "REVIVE_REQUEST" || data.type === "GET_COEF") {
+    var rows = sheet.getDataRange().getValues();
+    var searchName = data.name.toString().toLowerCase().trim();
     
-    <div style="margin: 10px 0;">
-        <select id="fingerSelector" onchange="changeFinger()" style="background: #111; color: #fff; padding: 8px; border-radius: 8px; border: 1px solid #333; width: 200px; text-align: center; font-weight: bold;">
-            <option value="Left Thumb">Left Thumb</option>
-            <option value="Left Index" selected>Left Index</option>
-            <option value="Left Middle">Left Middle</option>
-            <option value="Left Ring">Left Ring</option>
-            <option value="Left Pinky">Left Pinky</option>
-            <option value="Right Thumb">Right Thumb</option>
-            <option value="Right Index">Right Index</option>
-            <option value="Right Middle">Right Middle</option>
-            <option value="Right Ring">Right Ring</option>
-            <option value="Right Pinky">Right Pinky</option>
-        </select>
-    </div>
-
-    <div class="bio-ring-container">
-        <svg class="progress-ring" width="280" height="280">
-            <circle class="progress-ring__track" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-            <circle id="clockProgress" class="progress-ring__circle" stroke-width="8" fill="transparent" r="130" cx="140" cy="140"/>
-        </svg>
-        <div class="inner-display">
-            <video id="v" autoplay playsinline muted></video>
-            <div id="timer" class="timer-text">--</div>
-            <div id="gluResult" class="result-text">--</div>
-            <div class="unit-text">mg/dL</div>
-            
-            <div id="bioStats" style="position:absolute; bottom:60px; display:flex; gap:10px; font-size:9px; color:var(--accent); font-weight:bold; letter-spacing:1px;">
-                <span id="statPI">PI: --%</span>
-                <span id="statVisco">VISCO: --ms</span>
-            </div>
-            
-            <div id="sigStatus" style="font-size:10px; color:#888; position:absolute; top:60px; font-weight:bold; letter-spacing:1px;">READY</div>
-            <div id="bpmVal" style="font-size:14px; color:#f44336; position:absolute; top:80px; font-weight:bold;">-- BPM</div>
-            <canvas id="pulseGraph"></canvas>
-        </div>
-    </div>
-
-    <div class="controls">
-        <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
-        <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
-    </div>
-
-    <button class="btn-main" id="scanBtn" onclick="runAnalysis()">START SMART SCAN</button>
-    <div class="cal-bar-container"><div id="calBar"></div></div>
-    <div style="font-size:10px; color:#666; margin-top:5px; display:flex; justify-content:space-between; width:100%; max-width:400px; align-items:center;">
-        <span id="calText">DATABASE SYNC PROGRESS</span>
-        <span id="statusMsg" style="font-weight:bold;"></span>
-    </div>
-
-    <div class="trend-card">
-        <span style="font-size: 11px; color: var(--blue); font-weight: bold;">GLUCOSE TREND</span>
-        <canvas id="trendCanvas"></canvas>
-    </div>
-
-    <div class="card" id="syncCard">
-        <button onclick="syncCal()" style="background:var(--blue); border:none; color:white; padding:12px; border-radius:12px; font-weight:bold; width:100%;">SYNC WITH METER</button>
-        <input type="number" id="meterVal" placeholder="Actual Reading" style="width:100%; background:#000; border:1px solid #333; color:white; padding:12px; border-radius:8px; margin-top:10px; box-sizing:border-box;">
-    </div>
-
-    <div id="historyLog" class="card"></div>
-    <button onclick="hardReset()" style="margin-top:20px; background:transparent; border:1px solid #333; color:#555; padding:10px; border-radius:8px; font-size:10px;">FACTORY RESET APP</button>
-    <canvas id="c" width="50" height="50" style="display:none;"></canvas>
-
-<script>
-    const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzpOeeA-knysis8HzxtHSKxNaBb8Dq9RR96myBBQRPmoJJ0hQCTu8x6z2K6KnllcQxsMQ/exec"; 
-
-    const v = document.getElementById('v'), ve = document.getElementById('v_enroll'), c = document.getElementById('c'), ctx = c.getContext('2d');
-    const clock = document.getElementById('clockProgress'), pGraph = document.getElementById('pulseGraph'), pCtx = pGraph.getContext('2d');
-    const tCanvas = document.getElementById('trendCanvas'), tCtx = tCanvas.getContext('2d');
-    
-    let stream = null, cameraIdx = 0, devices = [], torch = false, buffer = [], pulseArr = [], greenBuffer = [];
-    let fingerProfiles = JSON.parse(localStorage.getItem('tathya_fingers')) || {};
-    let sessionBuffer = []; // Stores scans for "Best of 5" logic
-    let fullWaveform = []; // Store high-res waveform for AI training
-    let currentFinger = localStorage.getItem('tathya_current_finger') || "Left Index";    
-    
-    const defaultCal = { 
-        bInt: 220, 
-        syncCount: 0, 
-        finalAccuracyPercent: 0,
-        coefA: 12.5, coefB: 45.0, intercept: 65.0,
-        personalOffset: 0,
-        sensitivityScale: 1.0
+    var record = { 
+      coefA: 12.5, coefB: 45.0, intercept: 65.0,
+      syncCount: 0, personalOffset: 0, foundLatest: false, userFound: false
     };
 
-    // Helper to sanitize calibration data (Fixes NaN and migrates old profiles)
-    function sanitizeCal(c) {
-        if (!c) return null;
-        // Inject missing coefficients if migrating from old version
-        if (c.coefA == null || isNaN(c.coefA)) c.coefA = defaultCal.coefA;
-        if (c.coefB == null || isNaN(c.coefB)) c.coefB = defaultCal.coefB;
-        if (c.intercept == null || isNaN(c.intercept)) c.intercept = defaultCal.intercept;
-        // Fix NaN corruption
-        if (isNaN(c.personalOffset)) c.personalOffset = 0;
-        if (isNaN(c.bInt) || c.bInt <= 0) c.bInt = 220;
-        return c;
-    }
+    var syncPoints = [];
 
-    let cal = sanitizeCal(fingerProfiles[currentFinger]) || sanitizeCal(JSON.parse(localStorage.getItem('tathya_cal'))) || JSON.parse(JSON.stringify(defaultCal));
-    let history = JSON.parse(localStorage.getItem('tathya_hist')) || [];
-    let enrollmentData = JSON.parse(localStorage.getItem('tathya_enroll')) || null;
-    
-    const fingers = ["Left Thumb", "Left Index", "Left Middle", "Left Ring", "Left Pinky", "Right Thumb", "Right Index", "Right Middle", "Right Ring", "Right Pinky"];
-    let currentFingerIdx = 0, enrollTempData = [];
+    // Iterate backwards to find the most recent SYNC data
+    for (var i = rows.length - 1; i >= 1; i--) {
+        // NEW: Filter by BOTH Name and Finger to ensure 90% precision
+        var isUser = rows[i][1].toString().toLowerCase().trim() === searchName;
+        // If checkAllFingers is true, we ignore the finger check for initial login.
+        var isSameFinger = data.checkAllFingers ? true : (rows[i][11] === data.finger);
+        
+        if (isUser && isSameFinger) {
+            record.userFound = true;
+            if (rows[i][2] === "SYNC") {
+                var x = parseFloat(rows[i][7]); // Absorbance
+                var y = parseFloat(rows[i][5]);  // Actual Meter
+                var u = parseFloat(rows[i][9]); // UpstrokeTime
+                
+                // Only include points with valid biological markers in the regression
+                if (!isNaN(x) && !isNaN(y) && u > 40 && u < 300) {
+                    syncPoints.push({ x: x, y: y, u: u });
+                }
+            }
 
-    async function init() {
-        // ... existing camera setup ...
-        if(enrollmentData) {
-            await refreshIntelligence(); // Force check DB on startup
+            if (!record.foundLatest) { 
+                record.lastFinger = rows[i][11]; // Capture which finger this data belongs to
+                record.coefA = parseFloat(rows[i][13]) || record.coefA;
+                record.coefB = parseFloat(rows[i][14]) || record.coefB;
+                record.intercept = parseFloat(rows[i][15]) || record.intercept;
+                record.personalOffset = parseFloat(rows[i][16]) || 0;
+                record.foundLatest = true;
+            }
+            if (syncPoints.length >= 40) break;
         }
-
-        try {
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera();
-            if(!enrollmentData) {
-                document.getElementById('enrollModal').classList.add('visible');
-            } else {
-                reviveFromCloud(enrollmentData.name, false); // `false` = don't show alert on startup sync
-            }
-            
-            // Initialize Finger UI
-            document.getElementById('fingerSelector').value = currentFinger;
-            if (!fingerProfiles[currentFinger]) {
-                // If this finger has no profile, init it with current cal or default
-                fingerProfiles[currentFinger] = cal;
-            }
-            
-            updateUI(); drawTrend(); renderLog();
-        } catch(e) { alert("Camera Permission Required"); }
     }
+    syncPoints.reverse();
+    
+    // NEW: OUTLIER REJECTION AI (Phase 4)
+    syncPoints = syncPoints.filter(p => !(p.x < 0.1 && p.y > 180));
+    
+    record.syncCount = syncPoints.length;
 
-    // Add this function to fetch intelligence before every scan or on startup
-    async function refreshIntelligence() {
-        if(!enrollmentData) return;
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
-            });
-            const cloudBrain = await resp.json();
+    // Smart Logic: Quadratic Regression for 20+ Syncs
+    if (syncPoints.length >= 20) {
+        var n = syncPoints.length;
+        var sX=0, sX2=0, sX3=0, sX4=0, sY=0, sXY=0, sX2Y=0;
+        syncPoints.forEach(p => {
+            var x = p.x, y = p.y, x2 = x*x;
+            sX += x; sX2 += x2; sX3 += x2*x; sX4 += x2*x2;
+            sY += y; sXY += x*y; sX2Y += x2*y;
+        });
+
+        var det = (n * (sX2 * sX4 - sX3 * sX3) - sX * (sX * sX4 - sX2 * sX3) + sX2 * (sX * sX3 - sX2 * sX2));
+        if (Math.abs(det) > 1e-6) {
+            var a = (n * (sX2 * sX2Y - sX3 * sXY) - sX * (sX * sX2Y - sX2 * sXY) + sY * (sX * sX3 - sX2 * sX2)) / det;
+            // Sanity Check: If 'a' is positive, it's an upward curve (wrong for PPG). 
+            // We only apply if 'a' is negative or near zero.
+            if (a < 10) { 
+               record.coefA = a;
+               record.coefB = (n * (sXY * sX4 - sX2Y * sX3) - sY * (sX * sX4 - sX2 * sX3) + sX2 * (sX * sX2Y - sXY * sX2)) / det;
+               record.intercept = (sY * (sX2 * sX4 - sX3 * sX3) - sX * (sXY * sX4 - sX2Y * sX3) + sX2 * (sXY * sX3 - sX2Y * sX2)) / det;
+            }
+        }
+    } 
+    // NEW: Intermediate Logic (Linear Fit with Fixed Curve) for 5-19 Syncs
+    // This allows the system to learn the user's sensitivity (Slope) much earlier than 20 syncs.
+    else if (syncPoints.length >= 5) {
+        var n = syncPoints.length;
+        var sumW = 0, sumWX = 0, sumWY = 0, sumWXY = 0, sumWX2 = 0;
+        var fixedA = 12.5;
+
+        syncPoints.forEach(p => {
+            // AI WEIGHTING: Trust points more if they have a "human-like" upstroke
+            var weight = (p.u > 100 && p.u < 140) ? 1.5 : 1.0;
             
-            // Overwrite local calibration with DB truth
-            cal.coefA = cloudBrain.coefA;
-            cal.coefB = cloudBrain.coefB;
-            cal.intercept = cloudBrain.intercept;
-            cal.personalOffset = cloudBrain.personalOffset;
-            cal.syncCount = cloudBrain.syncCount;
+            var x = p.x;
+            var y_prime = p.y - (fixedA * x * x);
             
-            console.log("Brain refreshed from DB. Sync Level:", cal.syncCount);
-            updateUI();
-        //} catch(e) { console.error("Cloud check failed, using last known state."); }
-        // Replace your current catch block with this:
-       } catch(e) { 
-          alert("CRITICAL ERROR: " + e.name + " - " + e.message); 
-          console.error(e);
+            sumW += weight;
+            sumWX += weight * x;
+            sumWX2 += weight * x * x;
+            sumWY += weight * y_prime;
+            sumWXY += weight * x * y_prime;
+        });
+
+        var det = (sumW * sumWX2) - (sumWX * sumWX);
+        if (Math.abs(det) > 1e-6) {
+            record.coefA = fixedA;
+            record.coefB = ((sumW * sumWXY) - (sumWX * sumWY)) / det;
+            record.intercept = ((sumWY * sumWX2) - (sumWX * sumWXY)) / det;
+        }
+    }
+    
+    // ALWAYS calculate Personal Offset (Residual Correction)
+    // This ensures the model "snaps" to the latest sync even if the regression curve is rigid.
+    if (syncPoints.length >= 1) {
+        var currentOffset = 0;
+        syncPoints.forEach((p, idx) => {
+            var pred = (record.coefA * Math.pow(p.x, 2)) + (record.coefB * p.x) + record.intercept;
+            var error = p.y - pred;
+            // Dynamic Learning Rate: Trust recent data (0.8) more than old history
+            var learningRate = 0.8; 
+            currentOffset = (idx === 0) ? error : (currentOffset * (1 - learningRate)) + (error * learningRate);
+        });
+        record.personalOffset = currentOffset; 
+    }
+    return ContentService.createTextOutput(JSON.stringify(record)).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // SAVE LOGIC
+  var cA = data.coefA || 12.5;
+  var cB = data.coefB || 45.0;
+  var cI = data.intercept || 65.0;
+  var offset = (data.offset !== undefined) ? data.offset : (data.personalOffset || 0);
+
+  sheet.appendRow([
+    new Date(), data.name, data.type, data.val, data.raw, data.actual, 
+    data.noise, data.absorbance, data.perfusionIndex, 
+    isValidBio ? upstroke : "ERR", // Mark junk data clearly in the sheet
+    data.bpm, data.finger, data.hba1c, cA, cB, 
+    cI, offset, data.waveform
+  ]);
+  return ContentService.createTextOutput("Success");
 }
-    }
-
- async function setupCamera() {
-    if(stream) { stream.getTracks().forEach(t => t.stop()); }
-    
-    // We use the devices array from the init() function
-    const selectedDevice = devices[cameraIdx];
-    
-    const constraints = { 
-        video: { 
-            // We use 'ideal' instead of 'exact' to prevent crashes 
-            // if device IDs changed after your browser reset.
-            deviceId: selectedDevice ? { ideal: selectedDevice.deviceId } : undefined,
-            facingMode: 'environment', 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 } 
-        } 
-    };
-
-    try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        v.srcObject = stream;
-        ve.srcObject = stream;
-        
-        // Confirm successful link
-        const track = stream.getVideoTracks()[0];
-        console.log("Active Lens:", track.label);
-        updateStatus("CAMERA LINKED", "#00e676");
-    } catch(e) {
-        // AI Debug: This tells us if it's really a Permission or a Hardware issue
-        if (e.name === "NotAllowedError") {
-            alert("SECURITY: Please click the lock icon in the URL bar and 'Allow' Camera.");
-        } else {
-            alert("HARDWARE ERROR: " + e.name + ". Please close other camera apps.");
-        }
-    }
-}
-
-    async function toggleFlash() {
-        if(!stream) return;
-        const track = stream.getVideoTracks()[0];
-        try {
-            torch = !torch;
-            await track.applyConstraints({ advanced: [{ torch: torch }] });
-            document.getElementById('mainFlashBtn').classList.toggle('active', torch);
-            document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
-        } catch(e) { alert("Flash not supported on this lens."); torch = false; }
-    }
-
-    function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
-    }
-
-    function changeFinger() {
-        // Save current profile before switching
-        fingerProfiles[currentFinger] = cal;
-        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
-        
-        // Switch to new finger
-        currentFinger = document.getElementById('fingerSelector').value;
-        localStorage.setItem('tathya_current_finger', currentFinger);
-        sessionBuffer = []; // Reset batch logic when changing fingers
-        
-        // Load new profile (or create default if not exists)
-        if (!fingerProfiles[currentFinger]) {
-            fingerProfiles[currentFinger] = JSON.parse(JSON.stringify(defaultCal));
-        }
-        cal = sanitizeCal(fingerProfiles[currentFinger]);
-        
-        // Update Global Cal for backward compatibility
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-        updateUI();
-    }
-
-    function startEnrollStep() {
-        if(!torch) return alert("Turn on FLASH.");
-        document.getElementById('enrollBtn').disabled = true;
-        let start = Date.now(), stepBuffer = [];
-        const timer = setInterval(() => {
-            let elapsed = Date.now() - start;
-            document.getElementById('enrollCounter').innerText = Math.ceil((5000-elapsed)/1000);
-            ctx.drawImage(ve, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0;
-            for(let i=0; i<pix.length; i+=4) r += pix[i];
-            stepBuffer.push(r / (pix.length/4));
-            if(elapsed >= 5000) {
-                clearInterval(timer);
-                enrollTempData.push({ finger: fingers[currentFingerIdx], intensity: (stepBuffer.reduce((a,b)=>a+b,0)/stepBuffer.length) });
-                currentFingerIdx++;
-                if(currentFingerIdx < 10) {
-                    document.getElementById('enrollFingerName').innerText = fingers[currentFingerIdx].toUpperCase();
-                    document.getElementById('enrollCounter').innerText = "";
-                    document.getElementById('enrollBtn').disabled = false;
-                } else { finishEnrollment(); }
-            }
-        }, 100);
-    }
-
-    function finishEnrollment() {
-        const density = (enrollTempData[0].intensity / enrollTempData[4].intensity).toFixed(2);
-        const hba1c = document.getElementById('userHbA1c').value.trim();
-        enrollmentData = { name: document.getElementById('userName').value, density: density, baseline: enrollTempData[0].intensity.toFixed(2), hba1c: hba1c, type: "ENROLLMENT" };
-        localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-        pushToCloud(enrollmentData);
-        document.getElementById('enrollModal').classList.remove('visible');
-        if(torch) toggleFlash();
-    }    
-    async function startEnrollmentProcess() {
-        const name = document.getElementById('userName').value.trim();
-        if(!name) return alert("Please enter your name.");
-        
-        const isRevived = await reviveFromCloud(name, true); // `true` = show alert on success
-
-        if (isRevived) {
-            // User exists in cloud. Skip finger scanning.
-            // Preserve local HbA1c if entered, else try to keep existing
-            const hba1c = document.getElementById('userHbA1c').value.trim();
-            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt, hba1c: hba1c };
-            localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-            document.getElementById('enrollModal').classList.remove('visible');
-        } else {
-            // New user. Proceed to finger scanning.
-            document.getElementById('nameSection').style.display = "none";
-            document.getElementById('fingerSection').style.display = "block";
-        }
-    }
-
-  async function reviveFromCloud(name, showAlert) {
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                redirect: "follow",
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name, finger: currentFinger}) 
-            });
-            const cloudData = await resp.json();
-            if (cloudData && cloudData.userFound) {
-                // Switched to new non-linear model from the cloud
-                cal.coefA = cloudData.coefA;
-                cal.coefB = cloudData.coefB;
-                cal.intercept = cloudData.intercept;
-                cal.personalOffset = cloudData.personalOffset;
-                cal.syncCount = cloudData.syncCount;
-                cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
-                saveCal(); // Save to both global and finger profile
-                updateUI();
-                if (showAlert) {
-                    alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
-                }
-                return true;
-            }
-            return false;
-        } catch(e) {
-            console.log("New user or offline mode. Starting fresh.");
-            return false;
-        }
-    }
-
-    // Add this helper to find the ideal exposure based on past successful syncs
-    function getIdealExposure() {
-        // If we have high accuracy (>90%) and a syncCount > 5, 
-        // we use the 'bInt' (baseline intensity) from those successful syncs.
-        if (cal.syncCount > 5 && cal.finalAccuracyPercent > 90) {
-            // Optimization: If current light is too high, lower compensation
-            return -2.0; // Force lower exposure for high-end sensors like OnePlus 12
-        }
-        return -1.0; // Default slight underexposure for PPG
-    }
-
-    // Global function to pull the latest brain from the cloud
-    async function refreshBrain() {
-        if(!enrollmentData) return;
-        updateStatus("SYNCING BRAIN...", "#ffa000");
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name, finger: currentFinger}) 
-            });
-            const brain = await resp.json();
-            
-            // Strictly use DB coefficients
-            cal.coefA = brain.coefA;
-            cal.coefB = brain.coefB;
-            cal.intercept = brain.intercept;
-            cal.personalOffset = brain.personalOffset;
-            cal.syncCount = brain.syncCount;
-            
-            updateUI();
-            console.log(`Brain Mode: ${brain.status} | Syncs: ${cal.syncCount}`);
-        } catch(e) { console.warn("Cloud offline, using cached coefficients."); }
-    }
-
-    async function runAnalysis() {
-        if(!torch) return alert("Enable Flash.");
-        document.getElementById('scanBtn').disabled = true;
-        updateStatus("OPTIMIZING FOR HARDWARE GAP...", "#2196f3");
-    
-        if (stream) {
-            try {
-                const track = stream.getVideoTracks()[0];
-                const caps = track.getCapabilities ? track.getCapabilities() : null;
-                if (caps) {
-                    // STEP 1: Search for the light across the distance
-                    await track.applyConstraints({
-                        advanced: [
-                            { exposureMode: 'continuous' },
-                            { exposureCompensation: caps.exposureCompensation?.max || 0 },
-                            { torch: true }
-                        ]
-                    });
-                    // Wait for the sensor to "bridge" the gap
-                    await new Promise(r => setTimeout(r, 1500));
-                    
-                    // STEP 2: Lock the best possible hardware state
-                    await track.applyConstraints({
-                        advanced: [{ exposureMode: 'manual' }, { torch: true }]
-                    });
-                }
-            } catch(e) { console.warn("Hardware optimization bypassed."); }
-        }
-    
-        buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
-        let start = Date.now();
-        const duration = 12000; // Increased to 12s to allow for low-signal processing
-    
-        const timer = setInterval(() => {
-            const elapsed = Date.now() - start;
-            if (elapsed >= duration) {
-                clearInterval(timer);
-                // ROOT CAUSE FIX: Check for heart-beat presence rather than just light level
-                const variance = getVariance(buffer);
-                if(buffer.length < 100 || variance < 0.01) { 
-                    updateStatus("SIGNAL TOO WEAK - REPOSITION FINGER", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                } else {
-                    finishAnalysis(variance);
-                }
-                return;
-            }
-    
-            clock.style.strokeDashoffset = 816 - (Math.min(elapsed/duration,1) * 816);
-            document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
-            
-            ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0;
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; }
-            let intensity = r / (pix.length/4);
-            let greenInt = g / (pix.length/4);
-    
-            // REALISTIC LOGIC: Accept anything above 2.0 as long as it's pulsing
-            if(intensity < 2) {
-                updateStatus("ALIGNING FLASH...", "#ff9800");
-            } else {
-                updateStatus("PULSE DETECTED", "#00e676");
-                if(elapsed > 2000) { // 2s lead-in to allow for gain stabilization
-                    buffer.push(intensity); 
-                    greenBuffer.push(greenInt); 
-                    fullWaveform.push(intensity.toFixed(2)); 
-                }
-            }
-            pulseArr.push(intensity); 
-            if(pulseArr.length > 125) pulseArr.shift();
-            drawWave(); 
-            updateBPM();
-        }, 40); // Increased sampling rate from 100ms to 40ms
-    }
-
-    function updateBPM() {
-        if(pulseArr.length < 40) return;
-        
-        // Bandpass Filter (0.5Hz - 4.0Hz) for clean AC component
-        // 1. High Pass (DC Removal)
-        let hp = [], alpha = 0.85;
-        hp[0] = 0;
-        for(let i=1; i<pulseArr.length; i++) {
-            hp[i] = alpha * (hp[i-1] + pulseArr[i] - pulseArr[i-1]);
-        }
-        
-        // 2. Low Pass (Smoothing)
-        let smooth = [];
-        for(let i=1; i<hp.length-1; i++) {
-            smooth.push((hp[i-1] + hp[i] + hp[i+1]) / 3);
-        }
-        
-        // Count peaks (local maxima above mean)
-        let peaks = 0, mean = smooth.reduce((a,b)=>a+b,0)/smooth.length;
-        for(let i=1; i<smooth.length-1; i++) {
-            if(smooth[i] > mean && smooth[i] > smooth[i-1] && smooth[i] > smooth[i+1]) peaks++;
-        }
-        // 50 frames @ 100ms = 5 seconds. BPM = peaks * (60/5) = peaks * 12
-        let bpm = peaks * 12;
-        if(bpm > 50 && bpm < 180) document.getElementById('bpmVal').innerText = bpm + " ♥";
-    }
-
-    function drawWave() {
-        pCtx.clearRect(0,0, pGraph.width, pGraph.height);
-        pCtx.beginPath(); pCtx.strokeStyle = "#00e676"; pCtx.lineWidth = 3;
-        const max = Math.max(...pulseArr) || 100, min = Math.min(...pulseArr) || 0, range = max - min || 1;
-        pulseArr.forEach((p, i) => {
-            const x = (i / 125) * pGraph.width, y = pGraph.height - ((p - min) / range * pGraph.height);
-            if(i === 0) pCtx.moveTo(x,y); else pCtx.lineTo(x,y);
-        });
-        pCtx.stroke();
-    }
-
-    function updateStatus(msg, color) {
-        const el = document.getElementById('sigStatus');
-        el.innerText = msg; el.style.color = color;
-    }
-
-    function getVariance(arr) {
-        const mean = arr.reduce((a, b) => a + b, 0) / arr.length;
-        return arr.reduce((a, b) => a + (b - mean) ** 2, 0) / arr.length;
-    }
-
-    // Helper: Gaussian Smoothing Filter to remove sensor jitter
-    function applyGaussianFilter(data) {
-        const kernel = [0.061, 0.242, 0.383, 0.242, 0.061]; // 5-point Gaussian
-        let smoothed = [];
-        for (let i = 2; i < data.length - 2; i++) {
-            let val = 0;
-            for (let j = -2; j <= 2; j++) val += data[i + j] * kernel[j + 2];
-            smoothed.push(val);
-        }
-        return smoothed;
-    }
-
-    function finishAnalysis(variance) {
-        updateStatus("AI SIFTING FOR QUALITY SNAPS...", "#ffa000");
-
-        // 1. DATA SLICING: Chop 12s scan into 3s "Snaps" (40ms sampling)
-        const SNAP_SIZE = 75; 
-        let snaps = [];
-        for (let i = 0; i < buffer.length - SNAP_SIZE; i += 25) {
-            snaps.push(buffer.slice(i, i + SNAP_SIZE));
-        }
-
-        // 2. SCORING: Use SDPPG to find "Medical Grade" moments
-        let scoredSnaps = snaps.map(snap => {
-            let morphology = analyzePulseMorphology(snap);
-            let snapDC = snap.reduce((a, b) => a + b, 0) / snap.length;
-            
-            // Root Cause Fix: Specifically target your 40-55 intensity range
-            // This makes the AI "wait" for the perfect bridge
-            let intensityScore = (snapDC > 30) ? 100 : (snapDC / 30) * 100;
-            let finalScore = (morphology.confidence * 0.7) + (intensityScore * 0.3);
-
-            return { 
-                abs: Math.log(cal.bInt / snapDC) / 2.5, 
-                score: finalScore, 
-                stiffness: morphology.stiffness,
-                snap: snap,
-                dc: snapDC
-            };
-        });
-
-        // 3. RANK & PREDICT: Only extract glucose from top 3 moments
-        scoredSnaps.sort((a, b) => b.score - a.score);
-        let topSnaps = scoredSnaps.slice(0, 3);
-        
-        if (topSnaps.length === 0) {
-             setTimeout(runAnalysis, 1000);
-             return;
-        }
-
-        let predictions = topSnaps.map(s => {
-        let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
-        
-        // Use the 80x Stiffness multiplier we agreed on
-        let stiffnessAdj = (s.stiffness - 0.5) * 80; 
-        
-        // FIX: The 'return' must be correctly spelled and combined
-        return p + stiffnessAdj + (cal.personalOffset || 0);
-        });
-
-        let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
-        
-        // Compatibility for finalizeBatch
-        let best = topSnaps[0];
-        let snapVar = getVariance(best.snap);
-        let pi = (Math.sqrt(snapVar) / best.dc) * 100;
-        
-        sessionBuffer.push({ 
-            val: finalVal, 
-            abs: best.abs, 
-            noise: 100 - best.score,
-            raw: best.dc,
-            pi: pi,
-            upstroke: 120, 
-            wave: best.snap.map(n => n.toFixed(2))
-        });
-
-        // Handle Batch Logic (Best of 5)
-        if (sessionBuffer.length < 5) {
-            document.getElementById('gluResult').innerText = finalVal;
-            setTimeout(runAnalysis, 1000);
-        } else {
-            finalizeBatch();
-        }
-    }
-
-    // AI Function: Pulse Morphology Analysis
-    function analyzePulseMorphology(waveform) {
-        if (waveform.length < 20) return { stiffness: 0.5, confidence: 0, kurtosis: 0 };
-        
-        // 1. Calculate Acceleration (Second Derivative)
-        let acceleration = [];
-        for (let i = 2; i < waveform.length - 2; i++) {
-            acceleration.push(waveform[i+2] - 2*waveform[i] + waveform[i-2]);
-        }
-
-        // 2. Identify a-wave (peak) and b-wave (dip)
-        let a_wave = Math.max(...acceleration);
-        let b_wave = Math.min(...acceleration);
-        let stiffness = Math.abs(b_wave / (a_wave || 0.001));
-        
-        // 3. Score Stability: High variance in acceleration = Motion Artifact
-        let accMean = acceleration.reduce((a,b)=>a+b,0)/acceleration.length;
-        let accVar = acceleration.reduce((a,b)=>a+(b-accMean)**2,0)/acceleration.length;
-        let confidence = Math.max(0, 100 - (Math.sqrt(accVar) * 50));
-
-        return { stiffness: stiffness, confidence: confidence, kurtosis: calculateKurtosis(waveform) };
-    }
-
-    function calculateKurtosis(values) {
-        const n = values.length;
-        if (n === 0) return 0;
-        const mean = values.reduce((a, b) => a + b, 0) / n;
-        const standardDeviation = Math.sqrt(values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n);
-        const fourthMoment = values.reduce((a, b) => a + Math.pow(b - mean, 4), 0) / n;
-        return fourthMoment / Math.pow(standardDeviation, 4);
-    }
-
-    function finalizeBatch() {
-        // 1. Sort by noise and pick the most stable scan
-        sessionBuffer.sort((a, b) => a.noise - b.noise);
-        const best = sessionBuffer[0];
-        
-        // Trigger the Morphology AI
-        const morphology = analyzePulseMorphology(best.wave.map(Number));
-
-        // 2. Build the Advanced Feature Vector
-        const featureVector = {
-            name: enrollmentData.name,
-            type: "BATCH_SCAN",
-            val: best.val,
-            raw: best.raw.toFixed(2),
-            actual: "--",
-            noise: best.noise.toFixed(2),
-            finger: currentFinger,
-            absorbance: best.abs.toFixed(4),
-            
-            // --- NEW MORPHOLOGICAL FEATURES ---
-            perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
-            upstrokeTime: best.upstroke.toFixed(2), // Viscosity marker
-            stiffness: morphology.stiffness.toFixed(4), 
-            kurtosis: morphology.kurtosis.toFixed(4),
-            confidence: (100 - (best.noise * 100)).toFixed(2), // AI Reliability score
-            hba1c: enrollmentData.hba1c || "", // Biological anchor
-            bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
-            
-            // Coefficients for the current model
-            coefA: cal.coefA,
-            coefB: cal.coefB,
-            intercept: cal.intercept,
-            offset: cal.personalOffset,
-            
-            waveform: best.wave.join(",") // Raw data for Deep Learning training
-        };
-
-        // 3. Push to Cloud
-        pushToCloud(featureVector);
-        
-        // UI Updates
-        document.getElementById('gluResult').innerText = best.val;
-        updateStatus("AUTONOMOUS CALIBRATION ACTIVE", "var(--accent)");
-        
-        // Add to local history
-        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString(), timestamp: Date.now() };
-        history.unshift(logEntry);
-        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
-        
-        sessionBuffer = [];
-        document.getElementById('scanBtn').disabled = false;
-        document.getElementById('scanBtn').innerText = "START SMART SCAN";
-        renderLog(); drawTrend();
-    }
-
-    function syncCal() {
-        const actual = parseFloat(document.getElementById('meterVal').value);
-        if (!actual || history.length < 1) return alert("Scan first.");
-        
-        const lastScan = history[0];
-        const abs = parseFloat(lastScan.absorbance);
-        const stiffness = parseFloat(lastScan.stiffness) || 0.5;
-
-        // BIOLOGICAL MATCHING: Calculate exactly what the model predicted 
-        // WITHOUT the offset, so we can find the true residual error.
-        const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        const stiffnessImpact = (stiffness - 0.5) * 80;
-        
-        // The new offset is the difference between reality and our AI shape-analysis
-        const newOffset = actual - (baseModelVal + stiffnessImpact);
-        
-        const learningRate = 0.8;
-        cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
-        cal.syncCount = (cal.syncCount || 0) + 1;
-        
-        // Update local history and accuracy stats
-        history[0].actual = actual;
-        const predictedVal = parseFloat(lastScan.val);
-        const currentError = Math.abs(predictedVal - actual) / actual;
-        const currentAcc = Math.max(0, 100 - (currentError * 100));
-        const prevCount = cal.syncCount - 1;
-        const currentAvg = cal.finalAccuracyPercent || 0;
-        cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
-
-        saveCal(); // Persist the updated 'cal' object for the current finger
-        
-        // Push the 'Complete Feature Set' to the cloud for AI training
-        pushToCloud({ 
-            ...lastScan, 
-            actual: actual, 
-            type: "SYNC", 
-            offset: cal.personalOffset,
-            stiffness_at_sync: stiffness
-        });
-        
-        updateUI(); 
-        renderLog(); 
-        alert(`Sync Successful! Biological Offset: ${cal.personalOffset.toFixed(1)} mg/dL. System is now more 'Autonomous'.`);
-    }
-
-    function saveCal() {
-        fingerProfiles[currentFinger] = cal;
-        localStorage.setItem('tathya_fingers', JSON.stringify(fingerProfiles));
-        localStorage.setItem('tathya_cal', JSON.stringify(cal));
-    }
-
-    function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline, hba1c: enrollmentData?.hba1c };
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
-    }
-
-    function updateUI() {
-    const syncCount = cal.syncCount || 0;
-    const syncBar = document.getElementById('calBar');
-    const syncCard = document.getElementById('syncCard');
-    
-    // Calculate Confidence based on Sync Milestones
-    // 0 syncs = 5%, 20 syncs = 100%
-    let confidence = Math.min(100, Math.max(5, (syncCount / 20) * 100));
-    
-    // If we have local accuracy data, factor it in
-    if (cal.finalAccuracyPercent > 0) {
-        confidence = (confidence + cal.finalAccuracyPercent) / 2;
-    }
-
-    syncBar.style.width = confidence + "%";
-    
-    let statusText = "LEARNING (SYNC " + syncCount + "/20)";
-    let statusColor = "#ffa000";
-
-    if (syncCount >= 5 && syncCount < 15) {
-        statusText = "STABILIZING BIOMETRICS";
-        statusColor = "#2196f3";
-    } else if (syncCount >= 15 && syncCount < 20) {
-        statusText = "HIGH CONFIDENCE";
-        statusColor = "var(--accent)";
-    } else if (syncCount >= 20) {
-        statusText = "🔒 AUTONOMOUS MODE";
-        statusColor = "var(--accent)";
-        syncCard.style.display = "block"; // FIX: Always allow syncing to correct offsets
-    }
-
-    document.getElementById('calText').innerText = `Confidence Level: ${confidence.toFixed(0)}%`;
-    document.getElementById('statusMsg').innerText = statusText;
-    document.getElementById('statusMsg').style.color = statusColor;
-
-    // ADD THIS AT THE BOTTOM OF updateUI()
-    const lastAbs = history.length > 0 ? parseFloat(history[0].absorbance) : 0;
-    
-    // Logic: If Normalized Abs is between 0.6 and 0.9, it's perfect for 90% accuracy
-    const normStatus = (lastAbs > 0.5 && lastAbs < 1.0) ? "OPTIMAL" : (lastAbs >= 1.0 ? "HIGH" : "LOW");
-    const absStatusColor = (normStatus === "OPTIMAL") ? "#00e676" : "#ffa000";
-
-    document.getElementById('sigStatus').innerHTML = 
-        `<span style="color:${absStatusColor}">ABS: ${lastAbs.toFixed(2)} (${normStatus})</span> | SYNC: ${cal.syncCount}`;
-}
-
-    function hardReset() {
-        if(confirm("This will wipe all data and reset the app. Continue?")) {
-            localStorage.clear();
-            if('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                    for(let registration of registrations) { registration.unregister(); }
-                });
-            }
-            location.reload();
-        }
-    }
-
-    function drawTrend() {
-        if(history.length < 2) return;
-        tCanvas.width = tCanvas.offsetWidth; tCanvas.height = 100;
-        const data = [...history].reverse(), vals = data.map(h => h.val);
-        const min = Math.min(...vals) - 10, max = Math.max(...vals) + 10, range = max - min;
-        tCtx.beginPath(); tCtx.strokeStyle = "#2196f3"; tCtx.lineWidth = 3;
-        data.forEach((h, i) => {
-            const x = (i / (data.length - 1)) * tCanvas.width, y = tCanvas.height - ((h.val - min) / range * tCanvas.height);
-            if(i === 0) tCtx.moveTo(x,y); else tCtx.lineTo(x,y);
-        });
-        tCtx.stroke();
-    }
-
-    function renderLog() { document.getElementById('historyLog').innerHTML = history.map(h => `<div class="log-item"><span>${h.time}</span><span style="font-size:10px; color:#555;">Act: ${h.actual}</span><b>${h.val}</b></div>`).join(''); }
-    
-    // Register Service Worker for PWA
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js');
-    }
-
-    window.onload = init;
-</script>
-</body>
-</html>
