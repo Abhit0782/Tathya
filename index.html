@@ -583,71 +583,27 @@ async function reviveFromCloud(name, showAlert) {
     }
 
     function finishAnalysis(variance) {
-        updateStatus("AI SIFTING FOR QUALITY SNAPS...", "#ffa000");
-
-        // 1. DATA SLICING: Chop 12s scan into 3s "Snaps" (40ms sampling)
+        updateStatus("AI ANALYZING PULSE...", "#ffa000");
         const SNAP_SIZE = 75; 
         let snaps = [];
         for (let i = 0; i < buffer.length - SNAP_SIZE; i += 25) {
             snaps.push(buffer.slice(i, i + SNAP_SIZE));
         }
 
-        // 2. SCORING: Use SDPPG to find "Medical Grade" moments
         let scoredSnaps = snaps.map(snap => {
-            let morphology = analyzePulseMorphology(snap);
             let snapDC = snap.reduce((a, b) => a + b, 0) / snap.length;
-            
-            // Root Cause Fix: Specifically target your 40-55 intensity range
-            // This makes the AI "wait" for the perfect bridge
-            let intensityScore = (snapDC > 30) ? 100 : (snapDC / 30) * 100;
-            let finalScore = (morphology.confidence * 0.7) + (intensityScore * 0.3);
-
-            return { 
-                abs: Math.log(cal.bInt / snapDC) / 2.5, 
-                score: finalScore, 
-                stiffness: morphology.stiffness,
-                snap: snap,
-                dc: snapDC
-            };
+            let score = (snapDC > 30) ? 100 : (snapDC / 30) * 100;
+            return { abs: Math.log(cal.bInt / snapDC) / 2.5, score: score, dc: snapDC, snap: snap };
         });
 
-        // 3. RANK & PREDICT: Only extract glucose from top 3 moments
         scoredSnaps.sort((a, b) => b.score - a.score);
-        let topSnaps = scoredSnaps.slice(0, 3);
-        
-        if (topSnaps.length === 0) {
-             setTimeout(runAnalysis, 1000);
-             return;
-        }
+        let best = scoredSnaps[0];
 
-        let predictions = topSnaps.map(s => {
-        let p = (cal.coefA * Math.pow(s.abs, 2)) + (cal.coefB * s.abs) + cal.intercept;
+        // REMOVED STIFFNESS ADJUSTMENT
+        let finalVal = Math.round((cal.coefA * Math.pow(best.abs, 2)) + (cal.coefB * best.abs) + cal.intercept + (cal.personalOffset || 0));
         
-        // Use the 80x Stiffness multiplier we agreed on
-        let stiffnessAdj = (s.stiffness - 0.5) * 110; 
-        
-        // FIX: The 'return' must be correctly spelled and combined
-        return p + stiffnessAdj + (cal.personalOffset || 0);
-        });
+        sessionBuffer.push({ val: finalVal, abs: best.abs, noise: 100 - best.score, raw: best.dc, upstroke: 120, wave: best.snap.map(n => n.toFixed(2)) });
 
-        let finalVal = Math.round(predictions.reduce((a,b)=>a+b,0)/predictions.length);
-        
-        // Compatibility for finalizeBatch
-        let best = topSnaps[0];
-        let snapVar = getVariance(best.snap);
-        let pi = (Math.sqrt(snapVar) / best.dc) * 100;
-        
-        sessionBuffer.push({ 
-            val: finalVal, 
-            abs: best.abs, 
-            noise: 100 - best.score,
-            raw: best.dc,
-            pi: pi,
-            upstroke: 120, 
-            wave: best.snap.map(n => n.toFixed(2))
-        });
-
-        // Handle Batch Logic (Best of 5)
         if (sessionBuffer.length < 5) {
             document.getElementById('gluResult').innerText = finalVal;
             setTimeout(runAnalysis, 1000);
@@ -749,43 +705,19 @@ async function reviveFromCloud(name, showAlert) {
         
         const lastScan = history[0];
         const abs = parseFloat(lastScan.absorbance);
-        const stiffness = parseFloat(lastScan.stiffness) || 0.5;
 
-        // BIOLOGICAL MATCHING: Calculate exactly what the model predicted 
-        // WITHOUT the offset, so we can find the true residual error.
+        // REMOVED STIFFNESS FROM SYNC MATH
         const baseModelVal = (cal.coefA * Math.pow(abs, 2)) + (cal.coefB * abs) + cal.intercept;
-        const stiffnessImpact = (stiffness - 0.5) * 110;
-        
-        // The new offset is the difference between reality and our AI shape-analysis
-        const newOffset = actual - (baseModelVal + stiffnessImpact);
+        const newOffset = actual - baseModelVal;
         
         const learningRate = 0.8;
         cal.personalOffset = (cal.personalOffset * (1 - learningRate)) + (newOffset * learningRate);
         cal.syncCount = (cal.syncCount || 0) + 1;
         
-        // Update local history and accuracy stats
-        history[0].actual = actual;
-        const predictedVal = parseFloat(lastScan.val);
-        const currentError = Math.abs(predictedVal - actual) / actual;
-        const currentAcc = Math.max(0, 100 - (currentError * 100));
-        const prevCount = cal.syncCount - 1;
-        const currentAvg = cal.finalAccuracyPercent || 0;
-        cal.finalAccuracyPercent = prevCount > 0 ? ((currentAvg * prevCount) + currentAcc) / cal.syncCount : currentAcc;
-
         saveCal(); // Persist the updated 'cal' object for the current finger
-        
-        // Push the 'Complete Feature Set' to the cloud for AI training
-        pushToCloud({ 
-            ...lastScan, 
-            actual: actual, 
-            type: "SYNC", 
-            offset: cal.personalOffset,
-            stiffness_at_sync: stiffness
-        });
-        
-        updateUI(); 
-        renderLog(); 
-        alert(`Sync Successful! Biological Offset: ${cal.personalOffset.toFixed(1)} mg/dL. System is now more 'Autonomous'.`);
+        pushToCloud({ ...lastScan, actual: actual, type: "SYNC", personalOffset: cal.personalOffset });
+        updateUI(); renderLog(); 
+        alert("Sync Successful!");
     }
 
     function saveCal() {
