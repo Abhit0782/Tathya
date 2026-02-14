@@ -233,10 +233,10 @@
     async function setupCamera() {
         if(stream) { stream.getTracks().forEach(t => t.stop()); }
         try {
-            // FORCING THE MAIN LENS: Uses 'exact' to prevent wide-angle/selfie selection
+            // FREEDOM FIX: Uses 'cameraIdx' to let you cycle through ALL lenses manually
             const constraints = {
                 video: { 
-                    facingMode: { exact: "environment" },
+                    deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
                     width: { ideal: 1280 },
                     height: { ideal: 720 }
                 }
@@ -251,15 +251,14 @@
             const caps = track.getCapabilities ? track.getCapabilities() : {};
             
             if (caps.torch) {
-                updateStatus("CAMERA SECURED.", "#4caf50");
+                torch = track; // Re-link torch to the currently selected lens
+                updateStatus("LENS " + (cameraIdx + 1) + " ACTIVE. CHECK FLASH ALIGNMENT.", "#4caf50");
             }
         } catch (err) {
-            // FALLBACK: If 'exact' fails, request standard environment to trigger permission popup
-            console.warn("Retrying standard environment...");
+            console.warn("Manual lens selection failed, falling back...");
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             v.srcObject = stream;
             ve.srcObject = stream;
-            v.play();
         }
     }
 
@@ -375,8 +374,9 @@
             saveCal(); 
             updateUI();
             
-            if (showAlert) alert("Tathya Identity Detected: " + name);
-            return true; // Correctly skips the finger enrollment scan
+            // VISIBILITY FIX: Informs you exactly what was detected in the database
+            alert(`Tathya Identity Detected: ${name}\nHistorical Golden Syncs: ${cloudData.syncCount}\nConfidence: ${Math.min(100, cloudData.syncCount * 10)}%`);
+            return true; 
         }
         return false;
     } catch(e) {
