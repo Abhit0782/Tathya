@@ -236,30 +236,34 @@
 
     async function setupCamera() {
         if(stream) { stream.getTracks().forEach(t => t.stop()); }
-        
-        // Attempt to target the 'Primary' lens (usually the first 'environment' device)
-        const constraints = { 
-            video: { 
-                deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
-                facingMode: 'environment', 
-                width: { ideal: 1280 }, 
-                height: { ideal: 720 } 
-            } 
-        };
-
         try {
+            // FORCING THE MAIN LENS: Uses 'exact' to prevent wide-angle/selfie selection
+            const constraints = {
+                video: { 
+                    facingMode: { exact: "environment" },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
             stream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = stream;
             ve.srcObject = stream;
-            
-            // Trigger play to ensure it's active
             v.play(); 
-        } catch(e) {
-            // Fallback for OnePlus 12: If 'exact' device ID fails, use general environment
-            console.warn("Direct lens access failed, falling back to general back camera.");
+
+            const track = stream.getVideoTracks()[0];
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
+            
+            if (caps.torch) {
+                updateStatus("CAMERA SECURED.", "#4caf50");
+            }
+        } catch (err) {
+            // FALLBACK: If 'exact' fails, request standard environment to trigger permission popup
+            console.warn("Retrying standard environment...");
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             v.srcObject = stream;
             ve.srcObject = stream;
+            v.play();
         }
     }
 
@@ -372,6 +376,7 @@
                 cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
                 saveCal(); // Save to both global and finger profile
                 updateUI();
+                localStorage.setItem('syncConfidence', Math.min(100, cal.syncCount * 10));
                 if (showAlert) {
                     alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
                 }
@@ -420,7 +425,7 @@
     }
 
     async function runAnalysis() {
-        if(!torch) return alert("Enable Flash.");
+        if(!torch) return alert("Enable Flash first.");
         document.getElementById('scanBtn').disabled = true;
         updateStatus("OPTIMIZING FOR HARDWARE GAP...", "#2196f3");
     
@@ -448,14 +453,47 @@
             } catch(e) { console.warn("Hardware optimization bypassed."); }
         }
     
+        // Reset buffers
         buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
+        
+        updateStatus("CALIBRATING SIGNAL...", "#2196f3");
+
+        let timer = null;
+
+        let checkInterval = setInterval(() => {
+            if (buffer.length > 10) {
+                const currentDC = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+                
+                // UI FEEDBACK - Non-intrusive
+                if (currentDC > 70) {
+                    updateStatus("TOO BRIGHT: Press firmer", "#ff9800");
+                } else if (currentDC < 12) {
+                    updateStatus("TOO DARK: Adjust position", "#ff9800");
+                } else {
+                    updateStatus("SIGNAL QUALITY: GOOD", "#4caf50");
+                }
+
+                // AUTO-RESTART if signal is totally unusable (Saturation)
+                if (currentDC > 110 || currentDC < 5) {
+                    clearInterval(checkInterval);
+                    if(timer) clearInterval(timer);
+                    updateStatus("RE-CENTERING FINGER...", "#f44336");
+                    setTimeout(runAnalysis, 1500); // Quick silent restart
+                }
+            }
+            
+            // Stop checking once we have enough data to proceed
+            if (buffer.length >= 30) clearInterval(checkInterval);
+        }, 500);
+
         let start = Date.now();
         const duration = 12000; // Increased to 12s to allow for low-signal processing
     
-        const timer = setInterval(() => {
+        timer = setInterval(() => {
             const elapsed = Date.now() - start;
             if (elapsed >= duration) {
                 clearInterval(timer);
+                clearInterval(checkInterval);
                 // ROOT CAUSE FIX: Check for heart-beat presence rather than just light level
                 const variance = getVariance(buffer);
                 if(buffer.length < 100 || variance < 0.01) { 
@@ -476,17 +514,17 @@
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
     
-            // REALISTIC LOGIC: Accept anything above 2.0 as long as it's pulsing
-            if(intensity < 2) {
-                updateStatus("ALIGNING FLASH...", "#ff9800");
-            } else {
-                updateStatus("PULSE DETECTED", "#00e676");
-                if(elapsed > 2000) { // 2s lead-in to allow for gain stabilization
-                    buffer.push(intensity); 
-                    greenBuffer.push(greenInt); 
-                    fullWaveform.push(intensity.toFixed(2)); 
-                }
+            // Allow Smart Guard to handle status for first 1.5s
+            if (elapsed > 1500) {
+                if(intensity < 2) updateStatus("ALIGNING FLASH...", "#ff9800");
+                else updateStatus("PULSE DETECTED", "#00e676");
             }
+
+            // Push data immediately for Smart Guard
+            buffer.push(intensity); 
+            greenBuffer.push(greenInt); 
+            fullWaveform.push(intensity.toFixed(2)); 
+            
             pulseArr.push(intensity); 
             if(pulseArr.length > 125) pulseArr.shift();
             drawWave(); 
@@ -559,89 +597,47 @@
         return smoothed;
     }
 
+    // Mathematical Iron: Gaussian Smoothing
+    function applyGaussianSmooth(data) {
+        const kernel = [0.06, 0.24, 0.40, 0.24, 0.06];
+        let smoothed = [];
+        for (let i = 2; i < data.length - 2; i++) {
+            let sum = 0; for (let j = -2; j <= 2; j++) sum += data[i + j] * kernel[j + 2];
+            smoothed.push(sum);
+        }
+        return smoothed;
+    }
+
     function finishAnalysis(variance) {
         const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        // --- HYBRID LOGIC: CALCULATING THE COLOR SHIFT ---
-        const redVar = variance; 
-        
-        // Calculate Green Stability (The "Self-Learning" Key)
-        const gMu = greenAvg;
-        const greenVar = greenBuffer.reduce((a, b) => a + Math.pow(b - gMu, 2), 0) / greenBuffer.length;
+        // R-Ratio (Fixes exposure jumps)
+        const piRed = Math.sqrt(variance) / (redAvg + 0.001);
+        const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
+        const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
+        const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
-        // Standardize both signals (AC/DC)
-        const piRed = Math.sqrt(redVar) / (redAvg + 0.0001); 
-        const piGreen = Math.sqrt(greenVar) / (greenAvg + 0.0001); 
+        // Stiffness Index (New Research)
+        const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
+        let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
+        let apg = []; for (let i = 1; i < vpg.length; i++) apg.push(vpg[i] - vpg[i-1]);
+        const stiffness = Math.abs(Math.min(...apg) / (Math.max(...apg) + 0.001)).toFixed(4);
 
-        // The R-Ratio: This remains stable even if Raw_DC jumps from 45 to 2
-        const rRatio = (piRed / (piGreen + 0.0001)).toFixed(4); 
-
-        // --- YOUR CURRENT PREDICTION LOGIC (Remains exactly the same) ---
-        let pgr = Math.max(1.0, Math.min(3.5, redAvg / greenAvg));
-        if (redAvg < 60 || greenAvg < 10) pgr = 1.0; 
-        const normAbs = (piRed * 100) * (pgr / 2.5);
-        
+        const normAbs = (piRed * 100) * ((redAvg / greenAvg) / 2.5);
         let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        const finalVal = Math.round(Math.max(40, Math.min(500, prediction + (cal.personalOffset || 0))));
+
+        sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
         
-        // ... (Keep your upstroke and HbA1c logic here exactly as it is) ...
-        let upstrokeTime = 120; 
-        const numericWave = fullWaveform.map(Number);
-        const smoothedWave = applyGaussianFilter(numericWave);
-
-        if (smoothedWave.length > 20) {
-            let lastTrough = -1, lastPeak = -1;
-            for (let i = smoothedWave.length - 5; i > 1; i--) {
-                if (smoothedWave[i] < smoothedWave[i-1] && smoothedWave[i] < smoothedWave[i+1]) {
-                    lastTrough = i; break;
-                }
-            }
-            if (lastTrough > 0) {
-                for (let j = lastTrough; j < smoothedWave.length - 1; j++) {
-                    if (smoothedWave[j] > smoothedWave[j-1] && smoothedWave[j] > smoothedWave[j+1]) {
-                        lastPeak = j;
-                        break;
-                    }
-                }
-            }
-            if (lastPeak > lastTrough && lastTrough !== -1) {
-                upstrokeTime = Math.min(240, Math.max(60, (lastPeak - lastTrough) * 40)); 
-            }
-        }
-
-        prediction += (upstrokeTime - 120) * 0.15 + (cal.personalOffset || 0);
-
-        if (enrollmentData.hba1c) {
-            const eAG = (28.7 * parseFloat(enrollmentData.hba1c)) - 46.7;
-            prediction = (prediction * 0.85) + (eAG * 0.15);
-        }
-
-        const finalVal = Math.round(Math.max(40, Math.min(500, prediction)));
-
-        // Save with the NEW R-Ratio field
-        sessionBuffer.push({ 
-            val: finalVal, 
-            abs: normAbs, 
-            pi: (piRed * 100), 
-            upstroke: upstrokeTime, 
-            raw: redAvg,
-            noise: variance,
-            rRatio: rRatio, // This will now contain real data!
-            wave: fullWaveform 
-        });
-
         if (sessionBuffer.length < 5) {
-            document.getElementById('gluResult').innerText = finalVal;
-            updateStatus(`SYNCING BIOLOGY ${sessionBuffer.length}/5`, "#ffa000");
+            updateStatus(`CALIBRATING ${sessionBuffer.length}/5`, "#ffa000");
             setTimeout(runAnalysis, 1200);
-        } else {
-            finalizeBatch();
-        }
+        } else { finalizeBatch(); }
     }
 
     function finalizeBatch() {
         const best = sessionBuffer[0];
-
         const featureVector = {
             name: enrollmentData.name,
             type: "BATCH_SCAN",
@@ -651,31 +647,22 @@
             noise: best.noise.toFixed(2),
             finger: currentFinger,
             absorbance: best.abs.toFixed(4),
-            rRatio: best.rRatio, 
-            perfusionIndex: best.pi.toFixed(4), // AC/DC Ratio
-            upstrokeTime: best.upstroke.toFixed(2), // Viscosity marker
-            hba1c: enrollmentData.hba1c || "", // Biological anchor
+            rRatio: best.rRatio,
+            stiffness: best.stiffness, // NOW MAPPED TO THE 20TH COLUMN
+            perfusionIndex: best.pi.toFixed(4),
+            upstrokeTime: "120", // Placeholder or calculation
+            hba1c: enrollmentData.hba1c || "",
             bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
-            coefA: cal.coefA,
-            coefB: cal.coefB,
-            intercept: cal.intercept,
+            coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept,
             offset: cal.personalOffset,
             waveform: best.wave.join(",")
         };
 
         pushToCloud(featureVector);
-        
         document.getElementById('gluResult').innerText = best.val;
-        updateStatus("AUTONOMOUS CALIBRATION ACTIVE", "var(--accent)");
-        
-        const logEntry = { ...featureVector, time: new Date().toLocaleTimeString() };
-        history.unshift(logEntry);
-        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0,10)));
-        
-        sessionBuffer = [];
+        updateStatus("SCAN COMPLETE. LOGGED.", "#4caf50");
         document.getElementById('scanBtn').disabled = false;
-        document.getElementById('scanBtn').innerText = "START SMART SCAN";
-        renderLog(); drawTrend();
+        sessionBuffer = [];
     }
 
     function syncCal() {
@@ -738,9 +725,23 @@
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
     }
 
-    function pushToCloud(data) {
-        const fullData = { ...data, profileDensity: enrollmentData?.density, profileBaseline: enrollmentData?.baseline, hba1c: enrollmentData?.hba1c };
-        fetch(GOOGLE_SCRIPT_URL, {method:'POST', mode:'no-cors', body:JSON.stringify(fullData)});
+    function pushToCloud(dataVector) {
+        fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(dataVector) });
+        
+        // RESTORE CONFIDENCE: Asks the database for your real history
+        fetch(GOOGLE_SCRIPT_URL, { 
+            method: 'POST', 
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+        })
+        .then(r => r.json()).then(d => {
+            if (d.syncCount !== undefined) {
+                cal.syncCount = d.syncCount;
+                saveCal();
+                updateUI();
+                localStorage.setItem('syncConfidence', Math.min(100, d.syncCount * 10));
+            }
+        });
     }
 
     function updateUI() {
@@ -749,8 +750,8 @@
     const syncCard = document.getElementById('syncCard');
     
     // Calculate Confidence based on Sync Milestones
-    // 0 syncs = 5%, 20 syncs = 100%
-    let confidence = Math.min(100, Math.max(5, (syncCount / 20) * 100));
+    // 0 syncs = 5%, 10 syncs = 100% (Cloud-First Memory)
+    let confidence = Math.min(100, Math.max(5, syncCount * 10));
     
     // If we have local accuracy data, factor it in
     if (cal.finalAccuracyPercent > 0) {
@@ -759,16 +760,16 @@
 
     syncBar.style.width = confidence + "%";
     
-    let statusText = "LEARNING (SYNC " + syncCount + "/20)";
+    let statusText = "LEARNING (SYNC " + syncCount + "/10)";
     let statusColor = "#ffa000";
 
-    if (syncCount >= 5 && syncCount < 15) {
+    if (syncCount >= 3 && syncCount < 8) {
         statusText = "STABILIZING BIOMETRICS";
         statusColor = "#2196f3";
-    } else if (syncCount >= 15 && syncCount < 20) {
+    } else if (syncCount >= 8 && syncCount < 10) {
         statusText = "HIGH CONFIDENCE";
         statusColor = "var(--accent)";
-    } else if (syncCount >= 20) {
+    } else if (syncCount >= 10) {
         statusText = "🔒 AUTONOMOUS MODE";
         statusColor = "var(--accent)";
         syncCard.style.display = "block"; // FIX: Always allow syncing to correct offsets
