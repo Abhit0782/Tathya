@@ -358,31 +358,18 @@
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify({type: "REVIVE_REQUEST", name: name}),
-            // REQUIRED: Allows the phone to follow the redirect and read the JSON
-            redirect: 'follow' 
+            redirect: 'follow' // CRITICAL: Allows reading the JSON data
         });
-        
         const cloudData = await resp.json();
-        
         if (cloudData && cloudData.userFound) {
-            cal.coefA = cloudData.coefA;
-            cal.coefB = cloudData.coefB;
-            cal.intercept = cloudData.intercept;
-            cal.personalOffset = cloudData.personalOffset;
-            cal.syncCount = cloudData.syncCount;
-            
-            saveCal(); 
-            updateUI();
-            
-            // VISIBILITY FIX: Informs you exactly what was detected in the database
-            alert(`Tathya Identity Detected: ${name}\nHistorical Golden Syncs: ${cloudData.syncCount}\nConfidence: ${Math.min(100, cloudData.syncCount * 10)}%`);
-            return true; 
+            cal.coefA = cloudData.coefA; cal.coefB = cloudData.coefB; cal.intercept = cloudData.intercept;
+            cal.personalOffset = cloudData.personalOffset; cal.syncCount = cloudData.syncCount;
+            saveCal(); updateUI();
+            if (showAlert) alert("Tathya Identity Detected: " + name);
+            return true;
         }
         return false;
-    } catch(e) {
-        console.error("Cloud Revive Error:", e);
-        return false;
-    }
+    } catch(e) { return false; }
 }
 
     // Add this helper to find the ideal exposure based on past successful syncs
@@ -456,29 +443,25 @@
 
         let timer = null;
 
+        // NEW RESEARCH-GRADE SATURATION GATE
         let checkInterval = setInterval(() => {
             if (buffer.length > 10) {
                 const currentDC = buffer.reduce((a, b) => a + b, 0) / buffer.length;
                 
-                // UI FEEDBACK - Non-intrusive
-                if (currentDC > 70) {
-                    updateStatus("TOO BRIGHT: Press firmer", "#ff9800");
-                } else if (currentDC < 12) {
-                    updateStatus("TOO DARK: Adjust position", "#ff9800");
-                } else {
-                    updateStatus("SIGNAL QUALITY: GOOD", "#4caf50");
-                }
+                // Feed the status to the UI without stopping the scan
+                if (currentDC > 170) updateStatus("VERY BRIGHT: Maintain pressure", "#ffa000");
+                else if (currentDC < 5) updateStatus("VERY DARK: Adjust position", "#ffa000");
+                else updateStatus("SIGNAL STABLE", "#4caf50");
 
-                // AUTO-RESTART if signal is totally unusable (Saturation)
-                if (currentDC > 110 || currentDC < 5) {
+                // Ceiling moved from 110 to 220 to prevent restarts on OnePlus 12
+                if (currentDC > 220 || currentDC < 1) {
                     clearInterval(checkInterval);
                     if(timer) clearInterval(timer);
-                    updateStatus("RE-CENTERING FINGER...", "#f44336");
-                    setTimeout(runAnalysis, 1500); // Quick silent restart
+                    updateStatus("SENSOR SATURATED - RESTARTING", "#f44336");
+                    setTimeout(runAnalysis, 1000); 
                 }
             }
             
-            // Stop checking once we have enough data to proceed
             if (buffer.length >= 30) clearInterval(checkInterval);
         }, 500);
 
@@ -608,26 +591,29 @@
         const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        // R-Ratio (Fixes exposure jumps)
+        // 1. R-Ratio (Hardware Independence)
         const piRed = Math.sqrt(variance) / (redAvg + 0.001);
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
         const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
         const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
-        // Stiffness Index (New Research)
+        // 2. Stiffness Index (Physical Research Pillar)
         const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
         let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
         let apg = []; for (let i = 1; i < vpg.length; i++) apg.push(vpg[i] - vpg[i-1]);
         const stiffness = Math.abs(Math.min(...apg) / (Math.max(...apg) + 0.001)).toFixed(4);
 
-        const normAbs = (piRed * 100) * ((redAvg / greenAvg) / 2.5);
+        // 3. Dynamic Normalization (Fixes prediction jumps at high DC)
+        let hardwareScale = Math.max(1.0, Math.min(4.0, redAvg / greenAvg));
+        const normAbs = (piRed * 100) * (hardwareScale / 2.5);
+        
         let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
         const finalVal = Math.round(Math.max(40, Math.min(500, prediction + (cal.personalOffset || 0))));
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
-        
+
         if (sessionBuffer.length < 5) {
-            updateStatus(`CALIBRATING ${sessionBuffer.length}/5`, "#ffa000");
+            updateStatus(`RESEARCH SYNC ${sessionBuffer.length}/5`, "#ffa000");
             setTimeout(runAnalysis, 1200);
         } else { finalizeBatch(); }
     }
