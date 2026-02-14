@@ -425,7 +425,7 @@
                             { torch: true }
                         ]
                     });
-                    await new Promise(r => setTimeout(r, 2000)); 
+                    await new Promise(r => setTimeout(r, 3000)); 
                     
                     // STEP 2: HARD MANUAL LOCK (Prevents the 254 -> 24 jump)
                     await track.applyConstraints({
@@ -444,10 +444,10 @@
         let checkInterval = setInterval(() => {
             if (buffer.length > 10) {
                 const currentDC = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-                if (currentDC > 220 || currentDC < 1) {
+                if (currentDC > 245 || currentDC < 0.5) {
                     clearInterval(checkInterval);
                     if(timer) clearInterval(timer);
-                    updateStatus("SENSOR SATURATED - RESTARTING", "#f44336");
+                    updateStatus("HARDWARE RESET...", "#f44336");
                     setTimeout(runAnalysis, 1000); 
                 }
             }
@@ -601,12 +601,12 @@
         const timestamp = new Date().toLocaleTimeString();
         
         const featureVector = {
-            time: timestamp, // Required for the local History Log UI
+            time: timestamp, // Required for history log UI
             name: enrollmentData.name,
             type: "BATCH_SCAN",
             val: best.val,
             raw: best.raw.toFixed(2),
-            actual: "--", // Placeholder for when you enter meter value
+            actual: "--", 
             noise: best.noise.toFixed(2),
             finger: currentFinger,
             absorbance: best.abs.toFixed(4),
@@ -621,14 +621,14 @@
             waveform: best.wave.join(",")
         };
 
-        // CRITICAL: Push to local history so the Sync button recognizes the scan
+        // FORCE-LOG: Ensures the Sync button works regardless of quality
         history.unshift(featureVector); 
         localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0, 50)));
 
         pushToCloud(featureVector);
         document.getElementById('gluResult').innerText = best.val;
-        renderLog(); // Refresh the log UI
-        updateStatus("SCAN READY FOR SYNC", "#4caf50");
+        renderLog(); // Refresh the log immediately
+        updateStatus("SCAN COMPLETE: READY FOR SYNC", "#4caf50");
         document.getElementById('scanBtn').disabled = false;
         sessionBuffer = [];
     }
