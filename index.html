@@ -598,19 +598,22 @@
 
     function finalizeBatch() {
         const best = sessionBuffer[0];
+        const timestamp = new Date().toLocaleTimeString();
+        
         const featureVector = {
+            time: timestamp, // Required for the local History Log UI
             name: enrollmentData.name,
             type: "BATCH_SCAN",
             val: best.val,
             raw: best.raw.toFixed(2),
-            actual: "--",
+            actual: "--", // Placeholder for when you enter meter value
             noise: best.noise.toFixed(2),
             finger: currentFinger,
             absorbance: best.abs.toFixed(4),
             rRatio: best.rRatio,
-            stiffness: best.stiffness, // NOW MAPPED TO THE 20TH COLUMN
+            stiffness: best.stiffness,
             perfusionIndex: best.pi.toFixed(4),
-            upstrokeTime: "120", // Placeholder or calculation
+            upstrokeTime: "120",
             hba1c: enrollmentData.hba1c || "",
             bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
             coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept,
@@ -618,9 +621,14 @@
             waveform: best.wave.join(",")
         };
 
+        // CRITICAL: Push to local history so the Sync button recognizes the scan
+        history.unshift(featureVector); 
+        localStorage.setItem('tathya_hist', JSON.stringify(history.slice(0, 50)));
+
         pushToCloud(featureVector);
         document.getElementById('gluResult').innerText = best.val;
-        updateStatus("SCAN COMPLETE. LOGGED.", "#4caf50");
+        renderLog(); // Refresh the log UI
+        updateStatus("SCAN READY FOR SYNC", "#4caf50");
         document.getElementById('scanBtn').disabled = false;
         sessionBuffer = [];
     }
