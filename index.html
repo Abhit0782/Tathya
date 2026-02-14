@@ -186,17 +186,13 @@
         }
 
         try {
-            // Step 1: Get initial permission to see the full device list
+            // THE HANDSHAKE: Triggers the browser permission popup immediately
             await navigator.mediaDevices.getUserMedia({ video: true });
+            
             const d = await navigator.mediaDevices.enumerateDevices();
-            
-            // Step 2: Filter specifically for video inputs
             devices = d.filter(i => i.kind === 'videoinput');
-            
-            // Step 3: Populate a debug list or selector if you want to see all lenses
-            console.log("Detected Lenses:", devices.map(dev => dev.label));
 
-            await setupCamera();
+            await setupCamera(); // This then forces the OnePlus 12 Main Lens
             
             if(!enrollmentData) {
                 document.getElementById('enrollModal').classList.add('visible');
@@ -207,7 +203,7 @@
             document.getElementById('fingerSelector').value = currentFinger;
             updateUI(); drawTrend(); renderLog();
         } catch(e) { 
-            alert("Camera Initialization Failed. Please ensure permissions are granted."); 
+            alert("Camera Access Required. Please enable permissions in browser settings."); 
         }
     }
 
@@ -357,37 +353,37 @@
         }
     }
 
-  async function reviveFromCloud(name, showAlert) {
-        try {
-            const resp = await fetch(GOOGLE_SCRIPT_URL, { 
-                method: 'POST', 
-                headers: { "Content-Type": "text/plain" },
-                redirect: "follow",
-                body: JSON.stringify({type: "REVIVE_REQUEST", name: name}) 
-            });
-            const cloudData = await resp.json();
-            if (cloudData && cloudData.userFound) {
-                // Switched to new non-linear model from the cloud
-                cal.coefA = cloudData.coefA;
-                cal.coefB = cloudData.coefB;
-                cal.intercept = cloudData.intercept;
-                cal.personalOffset = cloudData.personalOffset;
-                cal.syncCount = cloudData.syncCount;
-                cal = sanitizeCal(cal); // Ensure cloud didn't send bad data
-                saveCal(); // Save to both global and finger profile
-                updateUI();
-                localStorage.setItem('syncConfidence', Math.min(100, cal.syncCount * 10));
-                if (showAlert) {
-                    alert("Tathya Memory Revived: " + name + " (Level " + cal.syncCount + ")");
-                }
-                return true;
-            }
-            return false;
-        } catch(e) {
-            console.log("New user or offline mode. Starting fresh.");
-            return false;
+ async function reviveFromCloud(name, showAlert) {
+    try {
+        const resp = await fetch(GOOGLE_SCRIPT_URL, { 
+            method: 'POST', 
+            headers: { "Content-Type": "text/plain" },
+            body: JSON.stringify({type: "REVIVE_REQUEST", name: name}),
+            // REQUIRED: Allows the phone to follow the redirect and read the JSON
+            redirect: 'follow' 
+        });
+        
+        const cloudData = await resp.json();
+        
+        if (cloudData && cloudData.userFound) {
+            cal.coefA = cloudData.coefA;
+            cal.coefB = cloudData.coefB;
+            cal.intercept = cloudData.intercept;
+            cal.personalOffset = cloudData.personalOffset;
+            cal.syncCount = cloudData.syncCount;
+            
+            saveCal(); 
+            updateUI();
+            
+            if (showAlert) alert("Tathya Identity Detected: " + name);
+            return true; // Correctly skips the finger enrollment scan
         }
+        return false;
+    } catch(e) {
+        console.error("Cloud Revive Error:", e);
+        return false;
     }
+}
 
     // Add this helper to find the ideal exposure based on past successful syncs
     function getIdealExposure() {
@@ -726,13 +722,19 @@
     }
 
     function pushToCloud(dataVector) {
-        fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(dataVector) });
+        // Standard log push
+        fetch(GOOGLE_SCRIPT_URL, { 
+            method: 'POST', 
+            mode: 'no-cors', // Standard logs don't need a response
+            body: JSON.stringify(dataVector) 
+        });
         
-        // RESTORE CONFIDENCE: Asks the database for your real history
+        // RESTORE CONFIDENCE: This specific call NEEDS to read the response
         fetch(GOOGLE_SCRIPT_URL, { 
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
-            body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}) 
+            body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}),
+            redirect: 'follow'
         })
         .then(r => r.json()).then(d => {
             if (d.syncCount !== undefined) {
