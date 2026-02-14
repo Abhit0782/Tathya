@@ -358,14 +358,14 @@
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify({type: "REVIVE_REQUEST", name: name}),
-            redirect: 'follow' // CRITICAL: Allows reading the JSON data
+            redirect: 'follow' // CRITICAL: Follows the redirect to read JSON
         });
         const cloudData = await resp.json();
         if (cloudData && cloudData.userFound) {
             cal.coefA = cloudData.coefA; cal.coefB = cloudData.coefB; cal.intercept = cloudData.intercept;
             cal.personalOffset = cloudData.personalOffset; cal.syncCount = cloudData.syncCount;
             saveCal(); updateUI();
-            if (showAlert) alert("Tathya Identity Detected: " + name);
+            if (showAlert) alert(`Tathya Identity Detected: ${name}\nHistorical Syncs: ${cloudData.syncCount}`);
             return true;
         }
         return false;
@@ -410,50 +410,40 @@
     async function runAnalysis() {
         if(!torch) return alert("Enable Flash first.");
         document.getElementById('scanBtn').disabled = true;
-        updateStatus("OPTIMIZING FOR HARDWARE GAP...", "#2196f3");
-    
+        updateStatus("HARDWARE LOCKING...", "#2196f3");
+
         if (stream) {
             try {
                 const track = stream.getVideoTracks()[0];
                 const caps = track.getCapabilities ? track.getCapabilities() : null;
                 if (caps) {
-                    // STEP 1: Search for the light across the distance
+                    // STEP 1: Settle exposure Compensation for high intensity
                     await track.applyConstraints({
                         advanced: [
                             { exposureMode: 'continuous' },
-                            { exposureCompensation: caps.exposureCompensation?.max || 0 },
+                            { exposureCompensation: caps.exposureCompensation?.min || -2.0 }, 
                             { torch: true }
                         ]
                     });
-                    // Wait for the sensor to "bridge" the gap
-                    await new Promise(r => setTimeout(r, 1500));
+                    await new Promise(r => setTimeout(r, 2000)); 
                     
-                    // STEP 2: Lock the best possible hardware state
+                    // STEP 2: HARD MANUAL LOCK (Prevents the 254 -> 24 jump)
                     await track.applyConstraints({
                         advanced: [{ exposureMode: 'manual' }, { torch: true }]
                     });
                 }
-            } catch(e) { console.warn("Hardware optimization bypassed."); }
+            } catch(e) { console.warn("Hardware lock failed, using software fallback."); }
         }
     
-        // Reset buffers
         buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
-        
-        updateStatus("CALIBRATING SIGNAL...", "#2196f3");
-
+        let start = Date.now();
+        const duration = 12000;
         let timer = null;
 
-        // NEW RESEARCH-GRADE SATURATION GATE
+        // Saturation Gate widened to 220 for the OnePlus 12 sensor
         let checkInterval = setInterval(() => {
             if (buffer.length > 10) {
                 const currentDC = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-                
-                // Feed the status to the UI without stopping the scan
-                if (currentDC > 170) updateStatus("VERY BRIGHT: Maintain pressure", "#ffa000");
-                else if (currentDC < 5) updateStatus("VERY DARK: Adjust position", "#ffa000");
-                else updateStatus("SIGNAL STABLE", "#4caf50");
-
-                // Ceiling moved from 110 to 220 to prevent restarts on OnePlus 12
                 if (currentDC > 220 || currentDC < 1) {
                     clearInterval(checkInterval);
                     if(timer) clearInterval(timer);
@@ -461,26 +451,16 @@
                     setTimeout(runAnalysis, 1000); 
                 }
             }
-            
             if (buffer.length >= 30) clearInterval(checkInterval);
         }, 500);
-
-        let start = Date.now();
-        const duration = 12000; // Increased to 12s to allow for low-signal processing
     
         timer = setInterval(() => {
             const elapsed = Date.now() - start;
             if (elapsed >= duration) {
                 clearInterval(timer);
                 clearInterval(checkInterval);
-                // ROOT CAUSE FIX: Check for heart-beat presence rather than just light level
                 const variance = getVariance(buffer);
-                if(buffer.length < 100 || variance < 0.01) { 
-                    updateStatus("SIGNAL TOO WEAK - REPOSITION FINGER", "#f44336");
-                    document.getElementById('scanBtn').disabled = false;
-                } else {
-                    finishAnalysis(variance);
-                }
+                finishAnalysis(variance);
                 return;
             }
     
@@ -493,13 +473,11 @@
             let intensity = r / (pix.length/4);
             let greenInt = g / (pix.length/4);
     
-            // Allow Smart Guard to handle status for first 1.5s
             if (elapsed > 1500) {
                 if(intensity < 2) updateStatus("ALIGNING FLASH...", "#ff9800");
                 else updateStatus("PULSE DETECTED", "#00e676");
             }
 
-            // Push data immediately for Smart Guard
             buffer.push(intensity); 
             greenBuffer.push(greenInt); 
             fullWaveform.push(intensity.toFixed(2)); 
@@ -508,7 +486,7 @@
             if(pulseArr.length > 125) pulseArr.shift();
             drawWave(); 
             updateBPM();
-        }, 40); // Increased sampling rate from 100ms to 40ms
+        }, 40);
     }
 
     function updateBPM() {
@@ -591,19 +569,19 @@
         const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        // 1. R-Ratio (Hardware Independence)
+        // 1. R-Ratio (Chemical Stability)
         const piRed = Math.sqrt(variance) / (redAvg + 0.001);
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
         const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
         const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
-        // 2. Stiffness Index (Physical Research Pillar)
+        // 2. Stiffness Index (Vascular Pulse Shape)
         const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
         let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
         let apg = []; for (let i = 1; i < vpg.length; i++) apg.push(vpg[i] - vpg[i-1]);
         const stiffness = Math.abs(Math.min(...apg) / (Math.max(...apg) + 0.001)).toFixed(4);
 
-        // 3. Dynamic Normalization (Fixes prediction jumps at high DC)
+        // 3. Hardware Scaling for High DC
         let hardwareScale = Math.max(1.0, Math.min(4.0, redAvg / greenAvg));
         const normAbs = (piRed * 100) * (hardwareScale / 2.5);
         
@@ -708,28 +686,28 @@
     }
 
     function pushToCloud(dataVector) {
-        // Standard log push
+        // 1. Save the Log (No response needed)
         fetch(GOOGLE_SCRIPT_URL, { 
             method: 'POST', 
-            mode: 'no-cors', // Standard logs don't need a response
+            mode: 'no-cors', 
             body: JSON.stringify(dataVector) 
         });
         
-        // RESTORE CONFIDENCE: This specific call NEEDS to read the response
+        // 2. Refresh Confidence (Response REQUIRED)
         fetch(GOOGLE_SCRIPT_URL, { 
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify({type: "GET_COEF", name: enrollmentData.name}),
-            redirect: 'follow'
+            redirect: 'follow' // CRITICAL: Follows the Google redirect to the JSON data
         })
         .then(r => r.json()).then(d => {
             if (d.syncCount !== undefined) {
                 cal.syncCount = d.syncCount;
                 saveCal();
                 updateUI();
-                localStorage.setItem('syncConfidence', Math.min(100, d.syncCount * 10));
+                console.log("Cloud Sync Verified. New Count: " + d.syncCount);
             }
-        });
+        }).catch(err => console.error("Sync Handshake Failed:", err));
     }
 
     function updateUI() {
