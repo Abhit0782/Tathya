@@ -358,14 +358,22 @@
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify({type: "REVIVE_REQUEST", name: name}),
-            redirect: 'follow' // CRITICAL: Follows the redirect to read JSON
+            redirect: 'follow'
         });
         const cloudData = await resp.json();
+        
         if (cloudData && cloudData.userFound) {
-            cal.coefA = cloudData.coefA; cal.coefB = cloudData.coefB; cal.intercept = cloudData.intercept;
-            cal.personalOffset = cloudData.personalOffset; cal.syncCount = cloudData.syncCount;
-            saveCal(); updateUI();
-            if (showAlert) alert(`Tathya Identity Detected: ${name}\nHistorical Syncs: ${cloudData.syncCount}`);
+            // THE RESUME FIX: Force adopts cloud coefficients instantly
+            cal.coefA = cloudData.coefA; 
+            cal.coefB = cloudData.coefB; 
+            cal.intercept = cloudData.intercept;
+            cal.personalOffset = cloudData.personalOffset; 
+            cal.syncCount = cloudData.syncCount;
+            
+            saveCal(); // Persist intelligence locally
+            updateUI(); // Reflect the Confidence Level
+            
+            if (showAlert) alert(`Tathya Brain Restored: ${name}\nSyncs: ${cloudData.syncCount}\nOffset: ${cal.personalOffset.toFixed(1)}`);
             return true;
         }
         return false;
