@@ -340,22 +340,23 @@
         const name = document.getElementById('userName').value.trim();
         if(!name) return alert("Please enter your name.");
         
-        // 1. Visually notify user we are searching the Master Brain
-        updateStatus("VERIFYING IDENTITY...", "#2196f3");
+        // 1. UI Feedback: Searching the Master Brain
+        const statusMsg = document.getElementById('statusMsg'); // Link to the existing status field
+        if(statusMsg) { statusMsg.innerText = "VERIFYING IDENTITY..."; statusMsg.style.color = "#2196f3"; }
         
         // 2. REACH OUT TO DATABASE BEFORE SCANNING
         const isRevived = await reviveFromCloud(name, true); 
 
         if (isRevived) {
-            // SUCCESS: AI found your previous intelligence for the current finger
+            // SUCCESS: Database found you!
             enrollmentData = { name: name, type: "REVIVED_USER" };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
             
-            // Hide the modal immediately - No scanning required!
+            // Skip scanning and go to Dashboard
             document.getElementById('enrollModal').classList.remove('visible');
             updateUI(); // Refresh confidence bar and Autonomous status
         } else {
-            // NEW USER: User not found in database, proceed to physical scan
+            // NEW USER: proceed to physical scan only if NOT in database
             document.getElementById('nameSection').style.display = "none";
             document.getElementById('fingerSection').style.display = "block";
             document.getElementById('enrollFingerName').innerText = fingers[0].toUpperCase();
