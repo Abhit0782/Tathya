@@ -297,6 +297,12 @@
         // Update Global Cal for backward compatibility
         localStorage.setItem('tathya_cal', JSON.stringify(cal));
         updateUI();
+
+        // NEW: Reach out to Cloud to see if we already know this finger's biology
+        if (enrollmentData) {
+            updateStatus("SYNCING FINGER INTEL...", "#2196f3");
+            reviveFromCloud(enrollmentData.name, false);
+        }
     }
 
     function startEnrollStep() {
@@ -357,23 +363,22 @@
         const resp = await fetch(GOOGLE_SCRIPT_URL, { 
             method: 'POST', 
             headers: { "Content-Type": "text/plain" },
-            body: JSON.stringify({type: "REVIVE_REQUEST", name: name}),
+            body: JSON.stringify({
+                type: "REVIVE_REQUEST", 
+                name: name, 
+                finger: currentFinger // CRITICAL: Tells cloud which finger brain to pull
+            }),
             redirect: 'follow'
         });
         const cloudData = await resp.json();
         
         if (cloudData && cloudData.userFound) {
-            // THE RESUME FIX: Force adopts cloud coefficients instantly
-            cal.coefA = cloudData.coefA; 
-            cal.coefB = cloudData.coefB; 
-            cal.intercept = cloudData.intercept;
+            cal.coefA = cloudData.coefA; cal.coefB = cloudData.coefB; cal.intercept = cloudData.intercept;
             cal.personalOffset = cloudData.personalOffset; 
             cal.syncCount = cloudData.syncCount;
             
-            saveCal(); // Persist intelligence locally
-            updateUI(); // Reflect the Confidence Level
-            
-            if (showAlert) alert(`Tathya Brain Restored: ${name}\nSyncs: ${cloudData.syncCount}\nOffset: ${cal.personalOffset.toFixed(1)}`);
+            saveCal(); updateUI();
+            if (showAlert) alert(`Vascular Brain Restored: ${currentFinger}\nConfidence: ${Math.min(100, cal.syncCount * 10)}%`);
             return true;
         }
         return false;
