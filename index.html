@@ -181,29 +181,27 @@
     let currentFingerIdx = 0, enrollTempData = [];
 
     async function init() {
-        if(enrollmentData) {
-            await refreshIntelligence();
-        }
-
         try {
-            // THE HANDSHAKE: Triggers the browser permission popup immediately
+            // Handshake for permissions
             await navigator.mediaDevices.getUserMedia({ video: true });
-            
             const d = await navigator.mediaDevices.enumerateDevices();
             devices = d.filter(i => i.kind === 'videoinput');
-
-            await setupCamera(); // This then forces the OnePlus 12 Main Lens
+            await setupCamera(); 
             
             if(!enrollmentData) {
+                // Show the modal but keep it on the Name section
                 document.getElementById('enrollModal').classList.add('visible');
+                document.getElementById('nameSection').style.display = "block";
+                document.getElementById('fingerSection').style.display = "none";
             } else {
+                // If already known locally, just refresh from cloud
                 reviveFromCloud(enrollmentData.name, false);
             }
             
             document.getElementById('fingerSelector').value = currentFinger;
             updateUI(); drawTrend(); renderLog();
         } catch(e) { 
-            alert("Camera Access Required. Please enable permissions in browser settings."); 
+            alert("Camera Access Required."); 
         }
     }
 
@@ -342,17 +340,16 @@
         const name = document.getElementById('userName').value.trim();
         if(!name) return alert("Please enter your name.");
         
+        updateStatus("SEARCHING CLOUD...", "#2196f3");
         const isRevived = await reviveFromCloud(name, true); // `true` = show alert on success
 
         if (isRevived) {
-            // User exists in cloud. Skip finger scanning.
-            // Preserve local HbA1c if entered, else try to keep existing
-            const hba1c = document.getElementById('userHbA1c').value.trim();
-            enrollmentData = { name: name, density: "Revived", baseline: cal.bInt, hba1c: hba1c };
+            // SUCCESS: You exist in the database. Skip the scanning.
+            enrollmentData = { name: name, type: "REVIVED_USER" };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
             document.getElementById('enrollModal').classList.remove('visible');
         } else {
-            // New user. Proceed to finger scanning.
+            // NEW USER: Only now do we show the finger scanning section
             document.getElementById('nameSection').style.display = "none";
             document.getElementById('fingerSection').style.display = "block";
         }
