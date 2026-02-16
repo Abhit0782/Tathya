@@ -340,18 +340,25 @@
         const name = document.getElementById('userName').value.trim();
         if(!name) return alert("Please enter your name.");
         
-        updateStatus("SEARCHING CLOUD...", "#2196f3");
-        const isRevived = await reviveFromCloud(name, true); // `true` = show alert on success
+        // 1. Visually notify user we are searching the Master Brain
+        updateStatus("VERIFYING IDENTITY...", "#2196f3");
+        
+        // 2. REACH OUT TO DATABASE BEFORE SCANNING
+        const isRevived = await reviveFromCloud(name, true); 
 
         if (isRevived) {
-            // SUCCESS: You exist in the database. Skip the scanning.
+            // SUCCESS: AI found your previous intelligence for the current finger
             enrollmentData = { name: name, type: "REVIVED_USER" };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
+            
+            // Hide the modal immediately - No scanning required!
             document.getElementById('enrollModal').classList.remove('visible');
+            updateUI(); // Refresh confidence bar and Autonomous status
         } else {
-            // NEW USER: Only now do we show the finger scanning section
+            // NEW USER: User not found in database, proceed to physical scan
             document.getElementById('nameSection').style.display = "none";
             document.getElementById('fingerSection').style.display = "block";
+            document.getElementById('enrollFingerName').innerText = fingers[0].toUpperCase();
         }
     }
 
