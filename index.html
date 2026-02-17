@@ -103,7 +103,7 @@
             
             <div id="bioStats" style="position:absolute; bottom:60px; display:flex; gap:10px; font-size:9px; color:var(--accent); font-weight:bold; letter-spacing:1px;">
                 <span id="statPI">PI: --%</span>
-                <span id="statVisco">VISCO: --ms</span>
+                <span id="statStiff">STIFF: --</span>
             </div>
             
             <div id="sigStatus" style="font-size:10px; color:#888; position:absolute; top:60px; font-weight:bold; letter-spacing:1px;">READY</div>
@@ -573,29 +573,41 @@
         const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        // 1. R-Ratio (Chemical Stability)
         const piRed = Math.sqrt(variance) / (redAvg + 0.001);
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
         const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
         const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
-        // 2. Stiffness Index (Vascular Pulse Shape)
         const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
         let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
         let apg = []; for (let i = 1; i < vpg.length; i++) apg.push(vpg[i] - vpg[i-1]);
-        const stiffness = Math.abs(Math.min(...apg) / (Math.max(...apg) + 0.001)).toFixed(4);
+        
+        const a_peak = Math.max(...apg);
+        const d_notch = Math.abs(Math.min(...apg));
+        const stiffness = (d_notch / (a_peak + 0.001)).toFixed(4);
 
-        // 3. Hardware Scaling for High DC
         let hardwareScale = Math.max(1.0, Math.min(4.0, redAvg / greenAvg));
         const normAbs = (piRed * 100) * (hardwareScale / 2.5);
         
-        let prediction = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
-        const finalVal = Math.round(Math.max(40, Math.min(500, prediction + (cal.personalOffset || 0))));
+        // BASE MODEL
+        let baseVal = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        
+        // SAFETY DAMPENING: Limit the offset to +/- 40% of the base value
+        let safeOffset = cal.personalOffset || 0;
+        const maxShift = baseVal * 0.4;
+        if (Math.abs(safeOffset) > maxShift) {
+            safeOffset = safeOffset > 0 ? maxShift : -maxShift;
+        }
+
+        let finalVal = Math.round(Math.max(40, Math.min(500, baseVal + safeOffset)));
+
+        // Update UI
+        document.getElementById('gluResult').innerText = finalVal;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
         if (sessionBuffer.length < 5) {
-            updateStatus(`RESEARCH SYNC ${sessionBuffer.length}/5`, "#ffa000");
             setTimeout(runAnalysis, 1200);
         } else { finalizeBatch(); }
     }
