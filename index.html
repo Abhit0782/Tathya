@@ -340,54 +340,56 @@
         const name = document.getElementById('userName').value.trim();
         if(!name) return alert("Please enter your name.");
         
-        // 1. UI Feedback: Searching the Master Brain
-        const statusMsg = document.getElementById('statusMsg'); 
-        if(statusMsg) { statusMsg.innerText = "VERIFYING IDENTITY..."; statusMsg.style.color = "#2196f3"; }
+        updateStatus("SEARCHING GLOBAL BRAIN...", "#2196f3");
         
-        // 2. REACH OUT TO DATABASE BEFORE SCANNING
+        // Attempt to revive using the name only first
         const isRevived = await reviveFromCloud(name, true); 
 
         if (isRevived) {
-            // SUCCESS: Database found you! No scanning required.
             enrollmentData = { name: name, type: "REVIVED_USER" };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
-            
-            // Skip scanning and go to Dashboard
             document.getElementById('enrollModal').classList.remove('visible');
-            updateUI(); // Refresh confidence bar and Autonomous status
+            updateUI();
         } else {
-            // NEW USER: proceed to physical scan only if NOT in database
+            // Only force scan if name is nowhere in the database
             document.getElementById('nameSection').style.display = "none";
             document.getElementById('fingerSection').style.display = "block";
-            document.getElementById('enrollFingerName').innerText = fingers[0].toUpperCase();
         }
     }
 
  async function reviveFromCloud(name, showAlert) {
     try {
+        // Use 'text/plain' to bypass CORS pre-flight issues with Google
         const resp = await fetch(GOOGLE_SCRIPT_URL, { 
             method: 'POST', 
+            mode: 'cors',
             headers: { "Content-Type": "text/plain" },
             body: JSON.stringify({
                 type: "REVIVE_REQUEST", 
                 name: name, 
-                finger: currentFinger // CRITICAL: Tells cloud which finger brain to pull
+                finger: currentFinger 
             }),
             redirect: 'follow'
         });
         const cloudData = await resp.json();
         
         if (cloudData && cloudData.userFound) {
-            cal.coefA = cloudData.coefA; cal.coefB = cloudData.coefB; cal.intercept = cloudData.intercept;
+            // Even if it's the wrong finger, we found the user!
+            cal.coefA = cloudData.coefA; 
+            cal.coefB = cloudData.coefB; 
+            cal.intercept = cloudData.intercept;
             cal.personalOffset = cloudData.personalOffset; 
             cal.syncCount = cloudData.syncCount;
             
             saveCal(); updateUI();
-            if (showAlert) alert(`Vascular Brain Restored: ${currentFinger}\nConfidence: ${Math.min(100, cal.syncCount * 10)}%`);
+            if (showAlert) alert(`Identity Verified: ${name}\nIntelligence Restored.`);
             return true;
         }
         return false;
-    } catch(e) { return false; }
+    } catch(e) { 
+        console.error("Cloud Error:", e);
+        return false; 
+    }
 }
 
     // Add this helper to find the ideal exposure based on past successful syncs
