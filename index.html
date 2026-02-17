@@ -616,7 +616,6 @@
 
     function finalizeBatch() {
         const best = sessionBuffer[0];
-        const blueAvg = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
         const timestamp = new Date().toLocaleTimeString();
         
         const featureVector = {
@@ -631,7 +630,7 @@
             absorbance: best.abs.toFixed(4),
             rRatio: best.rRatio,
             stiffness: best.stiffness,
-            blueDC: blueAvg.toFixed(2), // NEW: The Skin Mask marker
+            blueDC: (blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length).toFixed(2), // NEW
             perfusionIndex: best.pi.toFixed(4),
             upstrokeTime: "120",
             hba1c: enrollmentData.hba1c || "",
