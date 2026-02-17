@@ -454,7 +454,7 @@
             } catch(e) { console.warn("Tuning failed."); }
         }
     
-        buffer = []; pulseArr = []; greenBuffer = []; fullWaveform = [];
+        buffer = []; pulseArr = []; greenBuffer = []; blueBuffer = []; fullWaveform = [];
         let start = Date.now();
         const duration = 12000;
         let timer = null;
@@ -484,7 +484,7 @@
             
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0; 
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += (pix[i+2] * 10.0); }
+            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += (pix[i+2] * 50.0); }
             let intensity = r / (pix.length/4);
             buffer.push(intensity); 
             greenBuffer.push(g / (pix.length/4)); 
