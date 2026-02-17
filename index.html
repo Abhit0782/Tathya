@@ -483,12 +483,12 @@
             document.getElementById('timer').innerText = `00:${Math.max(0, Math.ceil((duration-elapsed)/1000)).toString().padStart(2,'0')}`;
             
             ctx.drawImage(v, 0, 0, 50, 50);
-            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0;
+            let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0; 
             for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += pix[i+2]; }
             let intensity = r / (pix.length/4);
             buffer.push(intensity); 
             greenBuffer.push(g / (pix.length/4)); 
-            blueBuffer.push(b / (pix.length/4)); // Store Blue DC
+            blueBuffer.push(b / (pix.length/4)); // Saves Blue DC
             fullWaveform.push(intensity.toFixed(2)); 
             pulseArr.push(intensity); if(pulseArr.length > 125) pulseArr.shift();
             drawWave(); updateBPM();
@@ -605,7 +605,7 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | BLUE: ${(blueBuffer.reduce((a,b)=>a+b,0)/blueBuffer.length).toFixed(0)}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
