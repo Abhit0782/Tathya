@@ -341,14 +341,14 @@
         if(!name) return alert("Please enter your name.");
         
         // 1. UI Feedback: Searching the Master Brain
-        const statusMsg = document.getElementById('statusMsg'); // Link to the existing status field
+        const statusMsg = document.getElementById('statusMsg'); 
         if(statusMsg) { statusMsg.innerText = "VERIFYING IDENTITY..."; statusMsg.style.color = "#2196f3"; }
         
         // 2. REACH OUT TO DATABASE BEFORE SCANNING
         const isRevived = await reviveFromCloud(name, true); 
 
         if (isRevived) {
-            // SUCCESS: Database found you!
+            // SUCCESS: Database found you! No scanning required.
             enrollmentData = { name: name, type: "REVIVED_USER" };
             localStorage.setItem('tathya_enroll', JSON.stringify(enrollmentData));
             
