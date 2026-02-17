@@ -484,7 +484,7 @@
             
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0; 
-            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += pix[i+2]; }
+            for(let i=0; i<pix.length; i+=4) { r += pix[i]; g += pix[i+1]; b += (pix[i+2] * 10.0); }
             let intensity = r / (pix.length/4);
             buffer.push(intensity); 
             greenBuffer.push(g / (pix.length/4)); 
@@ -605,7 +605,7 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | BLUE: ${(blueBuffer.reduce((a,b)=>a+b,0)/blueBuffer.length).toFixed(0)}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASK: ${(blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length).toFixed(2)}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
