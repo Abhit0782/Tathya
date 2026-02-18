@@ -572,10 +572,16 @@
     }
 
     function finishAnalysis(variance) {
-        const redAvg = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+        const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
+        const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        const piRed = Math.sqrt(variance) / (redAvg + 0.001);
+        // PHASE 2: THE SKIN MASK SUBTRACTION
+        // We subtract the skin reflection (Blue) from the total light (Red)
+        // to isolate the light that actually passed through the blood.
+        const pureRedDC = Math.max(5.0, redRaw - blueRaw); 
+
+        const piRed = Math.sqrt(variance) / (pureRedDC + 0.001); // Use PureRed for PI
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
         const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
         const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
@@ -588,7 +594,7 @@
         const d_notch = Math.abs(Math.min(...apg));
         const stiffness = (d_notch / (a_peak + 0.001)).toFixed(4);
 
-        let hardwareScale = Math.max(1.0, Math.min(4.0, redAvg / greenAvg));
+        let hardwareScale = Math.max(1.0, Math.min(4.0, redRaw / greenAvg));
         const normAbs = (piRed * 100) * (hardwareScale / 2.5);
         
         // BASE MODEL
@@ -605,9 +611,9 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASK: ${(blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length).toFixed(2)}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASKED: ${pureRedDC.toFixed(1)}`;
 
-        sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redAvg, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
+        sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redRaw, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
         if (sessionBuffer.length < 5) {
             setTimeout(runAnalysis, 1200);
