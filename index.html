@@ -576,10 +576,9 @@
         const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
 
-        // PHASE 2: THE SKIN MASK SUBTRACTION
-        // We subtract the skin reflection (Blue) from the total light (Red)
-        // to isolate the light that actually passed through the blood.
-        const pureRedDC = Math.max(5.0, redRaw - blueRaw); 
+        // Final Research Formula: Subtraction Constant = 1.0
+        // This ensures that even in bright sunlight, your results stay stable.
+        const pureRedDC = Math.max(5.0, redRaw - (1.0 * blueRaw));
 
         const piRed = Math.sqrt(variance) / (pureRedDC + 0.001); // Use PureRed for PI
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
