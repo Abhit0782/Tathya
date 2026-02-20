@@ -580,14 +580,14 @@
 
     function finishAnalysis(variance) {
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        // CRITICAL: Ignore the blueBuffer entirely and create the mask from Green right here
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
         
-        // Create the Synthetic Mask (70% of Green)
-        const syntheticMask = greenAvg * 0.70; 
+        // RED-SELF-MASKING: Since Green/Blue are muted, we use 15% of Red 
+        // to represent the "Surface Glare" that didn't hit the blood
+        const redMask = redRaw * 0.15; 
 
-        // SUBTRACTION: Clean the Red signal using the Synthetic Anchor
-        const pureRedDC = Math.max(5.0, redRaw - (0.8 * syntheticMask)); 
+        // SUBTRACTION: This forces the Absorbance to stay stable in bright light
+        const pureRedDC = Math.max(5.0, redRaw - redMask); 
         
         // Use PureRedDC for Perfusion Index and Absorbance
         const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
@@ -620,7 +620,7 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASKED: ${syntheticMask.toFixed(1)}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | R-MASK: ${redMask.toFixed(1)}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redRaw, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
