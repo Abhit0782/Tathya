@@ -607,7 +607,9 @@
         const normAbs = (piRed * 100) * (hardwareScale / 2.5);
         
         // BASE MODEL
-        let baseVal = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        // Phase 3 Damping: Stabilizing the high-resolution curve
+        // We are lowering the 14.2 to 11.5 to prevent "Pressure Spikes"
+        let baseVal = (11.5 * Math.pow(normAbs, 2)) + (45.0 * normAbs) + 70.0;
         
         // SAFETY DAMPENING: Limit the offset to +/- 40% of the base value
         let safeOffset = cal.personalOffset || 0;
