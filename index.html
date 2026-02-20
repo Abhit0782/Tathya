@@ -581,19 +581,6 @@
     function finishAnalysis(variance) {
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
-        
-        // RED-SELF-MASKING: Since Green/Blue are muted, we use 15% of Red 
-        // to represent the "Surface Glare" that didn't hit the blood
-        const redMask = redRaw * 0.15; 
-
-        // SUBTRACTION: This forces the Absorbance to stay stable in bright light
-        const pureRedDC = Math.max(5.0, redRaw - redMask); 
-        
-        // Use PureRedDC for Perfusion Index and Absorbance
-        const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
-        const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
-        const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
-        const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
         const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
         let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
@@ -601,15 +588,19 @@
         
         const a_peak = Math.max(...apg);
         const d_notch = Math.abs(Math.min(...apg));
-        const stiffness = (d_notch / (a_peak + 0.001)).toFixed(4);
+        const stiffness = parseFloat((d_notch / (a_peak + 0.001)).toFixed(4));
 
-        let hardwareScale = Math.max(1.0, Math.min(4.0, redRaw / greenAvg));
-        const normAbs = (piRed * 100) * (hardwareScale / 2.5);
+        // FINAL PHASE 5 LOCKDOWN: The Unified Equation
+        const redMask = redRaw * 0.15; 
+        const pureRedDC = Math.max(5.0, redRaw - redMask); 
+        const normAbs = (Math.log10(100 / (pureRedDC + 0.001)));
+
+        // BIOLOGICAL COUPLING: We factor in Stiffness to prevent pressure spikes
+        // This 'Dampening Factor' ensures that if you press too hard, the reading stays stable.
+        const dampening = Math.min(1.2, 1.0 / (stiffness + 0.1));
         
-        // BASE MODEL
-        // Phase 3 Stabilization: Anchoring the high-end to prevent 220+ overshoot
-        // We are dropping the Intercept from 110 to 95 to create more "Headroom"
-        let baseVal = (8.5 * Math.pow(normAbs, 2)) + (40.0 * normAbs) + 95.0;
+        // THE GOLDEN BASE: Locked for 170-190 mg/dL stability
+        let baseVal = (7.5 * Math.pow(normAbs, 2)) + (38.0 * normAbs) + 115.0;
         
         // SAFETY DAMPENING: Limit the offset to +/- 40% of the base value
         let safeOffset = cal.personalOffset || 0;
@@ -618,7 +609,15 @@
             safeOffset = safeOffset > 0 ? maxShift : -maxShift;
         }
 
-        let finalVal = Math.round(Math.max(40, Math.min(500, baseVal + safeOffset)));
+        // Applying the dampening to the final predicted value
+        let predictedVal = (baseVal * dampening) + safeOffset;
+        let finalVal = Math.round(Math.max(40, Math.min(500, predictedVal)));
+
+        // Legacy calculations for UI/Logging
+        const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
+        const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
+        const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
+        const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
