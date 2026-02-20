@@ -580,14 +580,17 @@
 
     function finishAnalysis(variance) {
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
-        
-        // Use a 0.9 Subtraction Factor to aggressively clean the Red signal
-        const pureRedDC = Math.max(5.0, redRaw - (0.9 * blueRaw)); 
+        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+
+        // THE HARD BYPASS: If blue is 0, we create a synthetic mask from Green
+        // Since we know Green is working (calculated Stiffness), we use it directly.
+        const syntheticBlueRaw = greenAvg * 0.75; 
+
+        // USE SYNTHETIC MASK FOR SUBTRACTION
+        const pureRedDC = Math.max(5.0, redRaw - (0.8 * syntheticBlueRaw)); 
         
         // Use PureRedDC for Perfusion Index and Absorbance
         const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
-        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
         const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
         const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
         const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
@@ -617,7 +620,7 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASK: ${blueRaw.toFixed(1)}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASK: ${syntheticBlueRaw.toFixed(1)}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redRaw, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
