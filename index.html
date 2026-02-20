@@ -607,9 +607,9 @@
         const normAbs = (piRed * 100) * (hardwareScale / 2.5);
         
         // BASE MODEL
-        // Phase 3 Final Polish: The Golden Ratio for 180-range stability
-        // Increasing the intercept to 110 to catch the high-range baseline
-        let baseVal = (8.5 * Math.pow(normAbs, 2)) + (40.0 * normAbs) + 110.0;
+        // Phase 3 Stabilization: Anchoring the high-end to prevent 220+ overshoot
+        // We are dropping the Intercept from 110 to 95 to create more "Headroom"
+        let baseVal = (8.5 * Math.pow(normAbs, 2)) + (40.0 * normAbs) + 95.0;
         
         // SAFETY DAMPENING: Limit the offset to +/- 40% of the base value
         let safeOffset = cal.personalOffset || 0;
