@@ -487,8 +487,7 @@
             for(let i=0; i<pix.length; i+=4) { 
                 r += pix[i]; 
                 g += pix[i+1]; 
-                // PHASE 2 GAIN: Multiplying by 50 to pull the signal out of the floor
-                // PHASE 2 RECOVERY: Borrow 10% of Green to wake up the Mask
+                // RECOVERY: We take 10% of Green light to act as our Blue-mask substitute
                 b += (pix[i+1] * 0.1) + (pix[i+2] * 40.0); 
             }
             let intensity = r / (pix.length/4);
@@ -581,9 +580,7 @@
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
 
-        // THE MASK: Isolate Red photons that actually hit your blood
-        // Subtraction Factor 1.0 (Verified by 3D Simulation)
-        // Reduce subtraction weight to 0.5 since we are using borrowed Green light
+        // Adjusted for the Spillover Patch
         const pureRedDC = Math.max(5.0, redRaw - (0.5 * blueRaw));
 
         // Use PureRedDC for Perfusion Index and Absorbance
