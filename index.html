@@ -487,8 +487,8 @@
             for(let i=0; i<pix.length; i+=4) { 
                 r += pix[i]; 
                 g += pix[i+1]; 
-                // RECOVERY: We take 10% of Green light to act as our Blue-mask substitute
-                b += (pix[i+1] * 0.1) + (pix[i+2] * 40.0); 
+                // INCREASED SPILLOVER: Use 50% Green to ensure a non-zero Mask
+                b += (pix[i+1] * 0.5) + (pix[i+2] * 40.0); 
             }
             let intensity = r / (pix.length/4);
             buffer.push(intensity); 
@@ -579,10 +579,10 @@
     function finishAnalysis(variance) {
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
-
-        // Adjusted for the Spillover Patch
-        const pureRedDC = Math.max(5.0, redRaw - (0.5 * blueRaw));
-
+        
+        // FINAL SUBTRACTION PATCH: Factor 1.0
+        const pureRedDC = Math.max(5.0, redRaw - (1.0 * blueRaw)); 
+        
         // Use PureRedDC for Perfusion Index and Absorbance
         const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
         const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
@@ -615,7 +615,7 @@
 
         // Update UI
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASKED: ${pureRedDC.toFixed(1)}`;
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | MASK: ${blueRaw.toFixed(1)}`;
 
         sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redRaw, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
 
