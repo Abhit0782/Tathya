@@ -485,10 +485,12 @@
             ctx.drawImage(v, 0, 0, 50, 50);
             let pix = ctx.getImageData(0, 0, 50, 50).data, r = 0, g = 0, b = 0;
             for(let i=0; i<pix.length; i+=4) { 
-                r += pix[i]; 
-                g += pix[i+1]; 
-                // INCREASED SPILLOVER: Use 50% Green to ensure a non-zero Mask
-                b += (pix[i+1] * 0.5) + (pix[i+2] * 40.0); 
+                let rVal = pix[i];
+                let gVal = pix[i+1];
+                r += rVal; 
+                g += gVal; 
+                // FORCE-PROXY: Use 80% of Green as the Mask since Blue is physically muted
+                b += (gVal * 0.8); 
             }
             let intensity = r / (pix.length/4);
             buffer.push(intensity); 
@@ -580,8 +582,8 @@
         const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
         const blueRaw = blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length;
         
-        // FINAL SUBTRACTION PATCH: Factor 1.0
-        const pureRedDC = Math.max(5.0, redRaw - (1.0 * blueRaw)); 
+        // Use a 0.9 Subtraction Factor to aggressively clean the Red signal
+        const pureRedDC = Math.max(5.0, redRaw - (0.9 * blueRaw)); 
         
         // Use PureRedDC for Perfusion Index and Absorbance
         const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
