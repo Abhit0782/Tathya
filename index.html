@@ -493,7 +493,19 @@
                 b += (gVal * 0.8); 
             }
             let intensity = r / (pix.length/4);
-            buffer.push(intensity); 
+            
+            if (window.TathyaNative) {
+                try {
+                    const fusion = JSON.parse(TathyaNative.getFusionData());
+                    // Phase 2: Spectral Masking (OnePlus 12 Exclusive)
+                    // Use the 13-channel baseline to subtract skin-tone noise
+                    const spectralCorrection = fusion.spectrum[0] * 0.05; 
+                    const pureIntensity = intensity - spectralCorrection;
+                    buffer.push(pureIntensity);
+                    intensity = pureIntensity; // Update for graphs and logs
+                } catch(e) { buffer.push(intensity); }
+            } else { buffer.push(intensity); }
+
             greenBuffer.push(g / (pix.length/4)); 
             blueBuffer.push(b / (pix.length/4)); // Store the High-Gain Blue DC
             fullWaveform.push(intensity.toFixed(2)); 
