@@ -808,7 +808,23 @@
         navigator.serviceWorker.register('sw.js');
     }
 
-    window.onload = init;
+    // Function to verify if the hardware bridge is connected
+    function verifyBridge() {
+        // Check if the native object exists on the window
+        if (window.TathyaNative) {
+            console.log("Bridge Connected!");
+            // Call the native method to show a popup on your phone
+            TathyaNative.showToast("OnePlus 12 Hardware Linked!");
+        } else {
+            console.error("Bridge NOT found. Are you running inside the custom Android app?");
+        }
+    }
+
+    // Run the check when the page is fully loaded
+    window.onload = function() {
+        verifyBridge();
+        init(); // Calls your existing initialization
+    };
 </script>
 </body>
 </html>
