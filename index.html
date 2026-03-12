@@ -261,15 +261,14 @@
         }
     }
 
-    async function toggleFlash() {
-        if(!stream) return;
-        const track = stream.getVideoTracks()[0];
-        try {
-            torch = !torch;
-            await track.applyConstraints({ advanced: [{ torch: torch }] });
-            document.getElementById('mainFlashBtn').classList.toggle('active', torch);
-            document.getElementById('enrollFlashBtn').classList.toggle('active', torch);
-        } catch(e) { alert("Flash not supported on this lens."); torch = false; }
+    function toggleFlash() {
+        if (window.TathyaNative) {
+            // Calls the Kotlin method directly
+            TathyaNative.toggleFlash();
+            document.getElementById('mainFlashBtn').classList.toggle('active');
+        } else {
+            alert("Native bridge not found. Run this inside the Android app.");
+        }
     }
 
     function toggleLens() {
