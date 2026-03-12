@@ -819,7 +819,13 @@
             console.error("Bridge NOT found. Are you running inside the custom Android app?");
         }
     }
-
+    function sniffSensors() {
+    if (window.TathyaNative) {
+        // Fetch the multi-sensor fusion data
+        const data = JSON.parse(TathyaNative.getFusionData());
+        alert("Temp: " + data.temp + "°C\nMotion: " + data.motion);
+    }
+}
     // Run the check when the page is fully loaded
     window.onload = function() {
         verifyBridge();
