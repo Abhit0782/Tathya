@@ -578,53 +578,61 @@
         return smoothed;
     }
 
-    function finishAnalysis(variance) {
-        const redRaw = buffer.reduce((a, b) => a + b, 0) / buffer.length;
-        const greenAvg = greenBuffer.reduce((a, b) => a + b, 0) / greenBuffer.length;
+    // Placeholder for the Waveform CNN inference model
+    async function runNeuralInference(featureVector) {
+        // In a real scenario, this would make a cloud API call.
+        // For now, it uses the fallback formula as a safety net.
+        console.log("CNN GATE: Using cloud inference (placeholder).");
+        const normAbs = Math.log10(100 / (featureVector.redAvg + 0.001));
+        let predictedVal = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+        predictedVal += (cal.personalOffset || 0);
+        return predictedVal;
+    }
 
-        const smoothed = applyGaussianSmooth(fullWaveform.map(Number));
+    async function finishAnalysis(variance) {
+        const rawData = buffer.map(Number);
+    
+        // 1. DATA PREPARATION (Input for CNN)
+        // We normalize the wave to a 0-1 range so the AI isn't confused by brightness
+        const min = Math.min(...rawData);
+        const max = Math.max(...rawData);
+        const normalizedWave = rawData.map(v => (v - min) / (max - min || 1));
+
+        // 2. FEATURE EXTRACTION (Morphological Layer)
+        const smoothed = applyGaussianSmooth(normalizedWave);
         let vpg = []; for (let i = 1; i < smoothed.length; i++) vpg.push(smoothed[i] - smoothed[i-1]);
         let apg = []; for (let i = 1; i < vpg.length; i++) apg.push(vpg[i] - vpg[i-1]);
         
-        const a_peak = Math.max(...apg);
+        const a_peak = Math.max(...apg.slice(0, apg.length/2));
         const d_notch = Math.abs(Math.min(...apg));
         const stiffness = parseFloat((d_notch / (a_peak + 0.001)).toFixed(4));
 
-        // FINAL PHASE 5 LOCKDOWN: The Unified Equation
-        const redMask = redRaw * 0.15; 
-        const pureRedDC = Math.max(5.0, redRaw - redMask); 
-        const normAbs = (Math.log10(100 / (pureRedDC + 0.001)));
+        // 3. MULTI-MODAL FUSION (The Input Vector)
+        const featureVector = {
+            waveform: normalizedWave, // The 1D "Image"
+            stiffness: stiffness,     // Physical arterial state
+            hba1c: parseFloat(enrollmentData.hba1c) || 5.7, // Biological anchor
+            redAvg: buffer.reduce((a, b) => a + b, 0) / buffer.length
+        };
 
-        // BIOLOGICAL COUPLING: We factor in Stiffness to prevent pressure spikes
-        // This 'Dampening Factor' ensures that if you press too hard, the reading stays stable.
-        const dampening = Math.min(1.2, 1.0 / (stiffness + 0.1));
-        
-        // THE GOLDEN BASE: Locked for 170-190 mg/dL stability
-        let baseVal = (7.5 * Math.pow(normAbs, 2)) + (38.0 * normAbs) + 115.0;
-        
-        // SAFETY DAMPENING: Limit the offset to +/- 40% of the base value
-        let safeOffset = cal.personalOffset || 0;
-        const maxShift = baseVal * 0.4;
-        if (Math.abs(safeOffset) > maxShift) {
-            safeOffset = safeOffset > 0 ? maxShift : -maxShift;
+        // 4. INTELLIGENCE GATE
+        // If we have 10+ syncs, we use the CNN logic; otherwise, we use the Base Formula
+        let predictedVal;
+        if (cal.syncCount >= 10) {
+            predictedVal = await runNeuralInference(featureVector); 
+        } else {
+            // Fallback to our stabilized "Math Iron" formula
+            const normAbs = Math.log10(100 / (featureVector.redAvg + 0.001));
+            predictedVal = (cal.coefA * Math.pow(normAbs, 2)) + (cal.coefB * normAbs) + cal.intercept;
+            predictedVal += (cal.personalOffset || 0);
         }
 
-        // Applying the dampening to the final predicted value
-        let predictedVal = (baseVal * dampening) + safeOffset;
-        let finalVal = Math.round(Math.max(40, Math.min(500, predictedVal)));
-
-        // Legacy calculations for UI/Logging
-        const piRed = Math.sqrt(variance) / (pureRedDC + 0.001);
-        const gVar = greenBuffer.reduce((a, b) => a + Math.pow(b - greenAvg, 2), 0) / greenBuffer.length;
-        const piGreen = Math.sqrt(gVar) / (greenAvg + 0.001);
-        const rRatio = (piRed / (piGreen + 0.001)).toFixed(4);
-
-        // Update UI
+        const finalVal = Math.round(Math.max(40, Math.min(500, predictedVal)));
         document.getElementById('gluResult').innerText = finalVal;
-        document.getElementById('statStiff').innerText = `STIFF: ${stiffness} | R-MASK: ${redMask.toFixed(1)}`;
-
-        sessionBuffer.push({ val: finalVal, abs: normAbs, pi: (piRed * 100), raw: redRaw, noise: variance, rRatio: rRatio, stiffness: stiffness, wave: fullWaveform });
-
+        document.getElementById('statStiff').innerText = `STIFF: ${stiffness}`;
+        
+        // Store for Cloud Training
+        sessionBuffer.push({ ...featureVector, val: finalVal, noise: variance });
         if (sessionBuffer.length < 5) {
             setTimeout(runAnalysis, 1200);
         } else { finalizeBatch(); }
@@ -634,26 +642,29 @@
         const best = sessionBuffer[0];
         const timestamp = new Date().toLocaleTimeString();
         
+        // Calculate absorbance, as it's needed for the sync logic
+        const absorbance = Math.log10(100 / (best.redAvg + 0.001));
+
         const featureVector = {
             time: timestamp, // Required for history log UI
             name: enrollmentData.name,
-            type: "BATCH_SCAN",
+            type: "BATCH_SCAN_CNN", // New type for CNN-ready data
             val: best.val,
-            raw: best.raw.toFixed(2),
+            raw: best.redAvg.toFixed(2),
             actual: "--", 
             noise: best.noise.toFixed(2),
             finger: currentFinger,
-            absorbance: best.abs.toFixed(4),
-            rRatio: best.rRatio,
+            absorbance: absorbance.toFixed(4),
+            rRatio: "0", // Legacy, not calculated in CNN pipeline
             stiffness: best.stiffness,
-            blueDC: (blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length).toFixed(2), // NEW
-            perfusionIndex: best.pi.toFixed(4),
+            blueDC: (blueBuffer.reduce((a, b) => a + b, 0) / blueBuffer.length).toFixed(2),
+            perfusionIndex: "0", // Legacy, not calculated in CNN pipeline
             upstrokeTime: "120",
-            hba1c: enrollmentData.hba1c || "",
+            hba1c: best.hba1c || "",
             bpm: document.getElementById('bpmVal').innerText.replace(' ♥', ''),
             coefA: cal.coefA, coefB: cal.coefB, intercept: cal.intercept,
             offset: cal.personalOffset,
-            waveform: best.wave.join(",")
+            waveform: best.waveform.map(v => v.toFixed(4)).join(",") // Send normalized wave
         };
 
         // FORCE-LOG: Ensures the Sync button works regardless of quality
