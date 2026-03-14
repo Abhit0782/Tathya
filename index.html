@@ -190,9 +190,8 @@
         try {
             // Handshake for permissions
             await navigator.mediaDevices.getUserMedia({ video: true });
-            const d = await navigator.mediaDevices.enumerateDevices();
-            devices = d.filter(i => i.kind === 'videoinput');
-            await setupCamera(); 
+            await getCameras();
+            await startCamera();
             
             if(!enrollmentData) {
                 // Show the modal but keep it on the Name section
@@ -234,94 +233,71 @@
         } catch(e) { console.error("Cloud check failed, using last known state."); }
     }
 
-    async function setupCamera() {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = devices.filter(device => device.kind === 'videoinput');
-    
-    // On OnePlus 12, the LYT-808 is usually labeled "camera 0, facing back"
-    const mainLens = videoDevices.find(device => 
-        device.label.toLowerCase().includes('0') || 
-        device.label.toLowerCase().includes('back')
-    );
-
-    const constraints = {
-        video: {
-            deviceId: mainLens ? { exact: mainLens.deviceId } : undefined,
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 }
-        }
-    };
-
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    document.getElementById('video').srcObject = stream;
-}
-const videoElement = document.getElementById('video');
-const videoSelect = document.getElementById('videoSource');
-
-// 1. Get all cameras and fill the dropdown
-async function getCameras() {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    videoSelect.innerHTML = ''; // Clear existing
-    
-    devices.forEach(device => {
-        if (device.kind === 'videoinput') {
+    // --- RESTORED LENS SELECTION LOGIC ---
+    async function getCameras() {
+        const d = await navigator.mediaDevices.enumerateDevices();
+        devices = d.filter(i => i.kind === 'videoinput');
+        
+        const videoSelect = document.getElementById('videoSource');
+        videoSelect.innerHTML = ''; 
+        
+        devices.forEach((device, index) => {
             const option = document.createElement('option');
             option.value = device.deviceId;
-            // The labels will show "Camera 0" (Main), "Camera 1" (Front), etc.
-            option.text = device.label || `Camera ${videoSelect.length + 1}`;
+            // Identifies the OnePlus 12 Main Lens (usually Camera 0)
+            option.text = device.label || `Lens ${index + 1}`;
             videoSelect.appendChild(option);
-        }
-    });
-}
-
-// 2. Start the selected camera
-async function startCamera() {
-    // Stop existing stream if running
-    if (window.currentStream) {
-        window.currentStream.getTracks().forEach(track => track.stop());
+        });
     }
 
-    const videoSource = videoSelect.value;
-    const constraints = {
-        video: {
-            deviceId: videoSource ? { exact: videoSource } : undefined,
-            // For Glucose monitoring, we need high resolution for the pulse
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 },
-            frameRate: { ideal: 30 }
+    async function startCamera() {
+        if (stream) { stream.getTracks().forEach(t => t.stop()); }
+        
+        const videoSource = document.getElementById('videoSource').value;
+        const constraints = {
+            video: { 
+                deviceId: videoSource ? { exact: videoSource } : undefined,
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 }
+            }
+        };
+
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            v.srcObject = stream;
+            // Keep enrollment video in sync if needed
+            if (ve) ve.srcObject = stream; 
+            
+            updateStatus("LENS LINKED TO BRIDGE", "#00e676");
+        } catch (err) {
+            console.error("Lens Selection Error:", err);
+            // Fallback to basic environment camera if specific ID fails
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            v.srcObject = stream;
         }
-    };
-
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        window.currentStream = stream;
-        videoElement.srcObject = stream;
-    } catch (error) {
-        console.error("Error accessing camera: ", error);
-        alert("Could not open this lens. Try another one.");
     }
-}
 
-// Initialize on load
-window.onload = async () => {
-    await getCameras();
-    // Default to the first back camera if possible
-    startCamera();
-};
+    // --- BRIDGE-POWERED FLASH ---
     function toggleFlash() {
         if (window.TathyaNative) {
-            // Calls the Kotlin method directly
+            // Uses the hardware bridge for 100% reliability on OnePlus 12
             TathyaNative.toggleFlash();
             document.getElementById('mainFlashBtn').classList.toggle('active');
         } else {
-            alert("Native bridge not found. Run this inside the Android app.");
+            // Fallback for standard browser testing
+            const track = stream.getVideoTracks()[0];
+            torch = !torch;
+            track.applyConstraints({ advanced: [{ torch: torch }] });
         }
     }
 
     function toggleLens() {
-        cameraIdx = (cameraIdx + 1) % devices.length;
-        setupCamera();
+        const videoSelect = document.getElementById('videoSource');
+        if (videoSelect.options.length > 1) {
+            videoSelect.selectedIndex = (videoSelect.selectedIndex + 1) % videoSelect.options.length;
+            startCamera(); // Manually trigger the camera start with the new selection
+        }
     }
 
     function changeFinger() {
