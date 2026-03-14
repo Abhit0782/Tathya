@@ -111,12 +111,7 @@
             <canvas id="pulseGraph"></canvas>
         </div>
     </div>
-<div class="camera-control">
-    <label for="videoSource">Select Lens: </label>
-    <select id="videoSource" onchange="startCamera()"></select>
-</div>
 
-<video id="video" autoplay playsinline muted style="width: 100%; max-width: 500px;"></video>
     <div class="controls">
         <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
         <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
@@ -190,8 +185,9 @@
         try {
             // Handshake for permissions
             await navigator.mediaDevices.getUserMedia({ video: true });
-            await getCameras();
-            await startCamera();
+            const d = await navigator.mediaDevices.enumerateDevices();
+            devices = d.filter(i => i.kind === 'videoinput');
+            await setupCamera(); 
             
             if(!enrollmentData) {
                 // Show the modal but keep it on the Name section
@@ -233,71 +229,51 @@
         } catch(e) { console.error("Cloud check failed, using last known state."); }
     }
 
-    // --- RESTORED LENS SELECTION LOGIC ---
-    async function getCameras() {
-        const d = await navigator.mediaDevices.enumerateDevices();
-        devices = d.filter(i => i.kind === 'videoinput');
-        
-        const videoSelect = document.getElementById('videoSource');
-        videoSelect.innerHTML = ''; 
-        
-        devices.forEach((device, index) => {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            // Identifies the OnePlus 12 Main Lens (usually Camera 0)
-            option.text = device.label || `Lens ${index + 1}`;
-            videoSelect.appendChild(option);
-        });
-    }
-
-    async function startCamera() {
-        if (stream) { stream.getTracks().forEach(t => t.stop()); }
-        
-        const videoSource = document.getElementById('videoSource').value;
-        const constraints = {
-            video: { 
-                deviceId: videoSource ? { exact: videoSource } : undefined,
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                frameRate: { ideal: 30 }
-            }
-        };
-
+    async function setupCamera() {
+        if(stream) { stream.getTracks().forEach(t => t.stop()); }
         try {
+            // FREEDOM FIX: Uses 'cameraIdx' to let you cycle through ALL lenses manually
+            const constraints = {
+                video: { 
+                    deviceId: devices[cameraIdx] ? { exact: devices[cameraIdx].deviceId } : undefined,
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                }
+            };
+
             stream = await navigator.mediaDevices.getUserMedia(constraints);
             v.srcObject = stream;
-            // Keep enrollment video in sync if needed
-            if (ve) ve.srcObject = stream; 
+            ve.srcObject = stream;
+            v.play(); 
+
+            const track = stream.getVideoTracks()[0];
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
             
-            updateStatus("LENS LINKED TO BRIDGE", "#00e676");
+            if (caps.torch) {
+                torch = track; // Re-link torch to the currently selected lens
+                updateStatus("LENS " + (cameraIdx + 1) + " ACTIVE. CHECK FLASH ALIGNMENT.", "#4caf50");
+            }
         } catch (err) {
-            console.error("Lens Selection Error:", err);
-            // Fallback to basic environment camera if specific ID fails
+            console.warn("Manual lens selection failed, falling back...");
             stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
             v.srcObject = stream;
+            ve.srcObject = stream;
         }
     }
 
-    // --- BRIDGE-POWERED FLASH ---
     function toggleFlash() {
         if (window.TathyaNative) {
-            // Uses the hardware bridge for 100% reliability on OnePlus 12
+            // Calls the Kotlin method directly
             TathyaNative.toggleFlash();
             document.getElementById('mainFlashBtn').classList.toggle('active');
         } else {
-            // Fallback for standard browser testing
-            const track = stream.getVideoTracks()[0];
-            torch = !torch;
-            track.applyConstraints({ advanced: [{ torch: torch }] });
+            alert("Native bridge not found. Run this inside the Android app.");
         }
     }
 
     function toggleLens() {
-        const videoSelect = document.getElementById('videoSource');
-        if (videoSelect.options.length > 1) {
-            videoSelect.selectedIndex = (videoSelect.selectedIndex + 1) % videoSelect.options.length;
-            startCamera(); // Manually trigger the camera start with the new selection
-        }
+        cameraIdx = (cameraIdx + 1) % devices.length;
+        setupCamera();
     }
 
     function changeFinger() {
