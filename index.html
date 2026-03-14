@@ -111,7 +111,12 @@
             <canvas id="pulseGraph"></canvas>
         </div>
     </div>
+<div class="camera-control">
+    <label for="videoSource">Select Lens: </label>
+    <select id="videoSource" onchange="startCamera()"></select>
+</div>
 
+<video id="video" autoplay playsinline muted style="width: 100%; max-width: 500px;"></video>
     <div class="controls">
         <button class="btn-small" onclick="toggleLens()">↺ LENS</button>
         <button class="btn-small" id="mainFlashBtn" onclick="toggleFlash()">🔦 FLASH</button>
