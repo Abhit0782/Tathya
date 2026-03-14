@@ -256,7 +256,59 @@
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     document.getElementById('video').srcObject = stream;
 }
+const videoElement = document.getElementById('video');
+const videoSelect = document.getElementById('videoSource');
 
+// 1. Get all cameras and fill the dropdown
+async function getCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    videoSelect.innerHTML = ''; // Clear existing
+    
+    devices.forEach(device => {
+        if (device.kind === 'videoinput') {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            // The labels will show "Camera 0" (Main), "Camera 1" (Front), etc.
+            option.text = device.label || `Camera ${videoSelect.length + 1}`;
+            videoSelect.appendChild(option);
+        }
+    });
+}
+
+// 2. Start the selected camera
+async function startCamera() {
+    // Stop existing stream if running
+    if (window.currentStream) {
+        window.currentStream.getTracks().forEach(track => track.stop());
+    }
+
+    const videoSource = videoSelect.value;
+    const constraints = {
+        video: {
+            deviceId: videoSource ? { exact: videoSource } : undefined,
+            // For Glucose monitoring, we need high resolution for the pulse
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 }
+        }
+    };
+
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        window.currentStream = stream;
+        videoElement.srcObject = stream;
+    } catch (error) {
+        console.error("Error accessing camera: ", error);
+        alert("Could not open this lens. Try another one.");
+    }
+}
+
+// Initialize on load
+window.onload = async () => {
+    await getCameras();
+    // Default to the first back camera if possible
+    startCamera();
+};
     function toggleFlash() {
         if (window.TathyaNative) {
             // Calls the Kotlin method directly
